@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1024 1024"
+     width="1024"
+     height="1024"
+     role="img"
+     aria-labelledby="parkinstep-logo-title parkinstep-logo-desc">
+  <title id="parkinstep-logo-title">ParkinStep Brand Icon Master Grid</title>
+  <desc id="parkinstep-logo-desc">
+    Master canvas 1024x1024 untuk ikon ParkinStep (Mobile-FOG).
+    Safe Zone Android Adaptive Icon: lingkaran pusat (512, 512) beradius 338 px (66% diameter).
+    Margin optik minimum: 102 px di setiap sisi (area aktif 102..922).
+  </desc>
+
+  <defs>
+    <!-- Gradien utama ParkinStep (Vibrant Azure -> Rhythm Aqua, selaras referensi Beats Medical) -->
+    <linearGradient id="parkinstep-azure-aqua" x1="15%" y1="15%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#00A9EC" />
+      <stop offset="100%" stop-color="#1AEAD8" />
+    </linearGradient>
+
+    <!-- Gradien gelap untuk latar App Icon / Dark Auth Screen -->
+    <linearGradient id="parkinstep-midnight-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1B2B" />
+      <stop offset="100%" stop-color="#132A45" />
+    </linearGradient>
+
+    <!-- Palet token referensi cepat:
+      Deep Midnight Navy : #0B1B2B
+      Clinical Royal Navy: #234085
+      Vibrant Azure      : #00A9EC
+      Rhythm Aqua        : #1AEAD8
+      Soft Ice Surface   : #D8F1FC
+      Clinical White     : #FFFFFF
+    -->
+  </defs>
+
+  <!-- LAYER 1: Latar Belakang (Untuk Adaptive Icon Android, pisahkan layer ini sebagai background layer) -->
+  <g id="background">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#parkinstep-midnight-bg)" />
+  </g>
+
+  <!-- LAYER 2: Logo Mark Utama (Semua geometri inti WAJIB berada di dalam radius <= 338 px dari pusat 512,512) -->
+  <g id="logo-mark">
+    <!-- Ganti elemen placeholder di bawah dengan path vektor konsep terpilih -->
+    <circle cx="512" cy="512" r="280"
+            fill="none"
+            stroke="url(#parkinstep-azure-aqua)"
+            stroke-width="64"
+            stroke-linecap="round"
+            stroke-dasharray="1420 340" />
+    <circle cx="512" cy="512" r="96" fill="#00A9EC" />
+  </g>
+</svg>
