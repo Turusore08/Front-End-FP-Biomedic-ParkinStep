@@ -39,4 +39,5 @@ abstract final class AppColors {
   static const Color alertRed = Color(0xFFDC2626); // 4.83:1 w/ #FFFFFF
   static const Color redSoftBg = Color(0xFFFEF2F2);
   static const Color redDarkText = Color(0xFF991B1B);
+  static const Color upperBodySky = Color(0xFF38BDF8);
 }

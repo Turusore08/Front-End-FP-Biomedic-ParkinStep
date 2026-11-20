@@ -24,6 +24,20 @@ abstract final class AppTypography {
     );
   }
 
+  static TextStyle displayTimer({
+    Color color = AppColors.pureWhite,
+    double size = 48.0,
+  }) {
+    return GoogleFonts.plusJakartaSans(
+      fontSize: size,
+      fontWeight: FontWeight.w800,
+      height: 1.05,
+      letterSpacing: -1.0,
+      color: color,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+  }
+
   static TextStyle heroMetric({
     Color color = AppColors.royalNavy,
     double size = 28.0,

@@ -9,10 +9,14 @@ class ParkinThemeExt extends ThemeExtension<ParkinThemeExt> {
   const ParkinThemeExt({
     required this.azureCtaShadow,
     required this.subtleCardShadow,
+    required this.diamondControlShadow,
+    required this.rhythmAquaGlow,
   });
 
   final List<BoxShadow> azureCtaShadow;
   final List<BoxShadow> subtleCardShadow;
+  final List<BoxShadow> diamondControlShadow;
+  final List<BoxShadow> rhythmAquaGlow;
 
   static const ParkinThemeExt standard = ParkinThemeExt(
     azureCtaShadow: <BoxShadow>[
@@ -29,16 +33,34 @@ class ParkinThemeExt extends ThemeExtension<ParkinThemeExt> {
         offset: Offset(0, 4),
       ),
     ],
+    diamondControlShadow: <BoxShadow>[
+      BoxShadow(
+        color: Color(0x570B1B2B),
+        blurRadius: 18,
+        offset: Offset(0, 8),
+      ),
+    ],
+    rhythmAquaGlow: <BoxShadow>[
+      BoxShadow(
+        color: Color(0x3D1AEAD8),
+        blurRadius: 24,
+        spreadRadius: 2,
+      ),
+    ],
   );
 
   @override
   ParkinThemeExt copyWith({
     List<BoxShadow>? azureCtaShadow,
     List<BoxShadow>? subtleCardShadow,
+    List<BoxShadow>? diamondControlShadow,
+    List<BoxShadow>? rhythmAquaGlow,
   }) {
     return ParkinThemeExt(
       azureCtaShadow: azureCtaShadow ?? this.azureCtaShadow,
       subtleCardShadow: subtleCardShadow ?? this.subtleCardShadow,
+      diamondControlShadow: diamondControlShadow ?? this.diamondControlShadow,
+      rhythmAquaGlow: rhythmAquaGlow ?? this.rhythmAquaGlow,
     );
   }
 

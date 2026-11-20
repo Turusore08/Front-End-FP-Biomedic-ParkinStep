@@ -1,20 +1,39 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../../di/dashboard_providers.dart';
 import '../../../../domain/constants/clinical_copy.dart';
+import '../../../../domain/entities/session_summary_item.dart';
 import '../../../../domain/enums/medication_state.dart';
 import '../../../theme/app_colors.dart';
 import '../../../theme/app_typography.dart';
 import '../../../widgets/design_system/parkin_empty_state_card.dart';
 import '../../../widgets/design_system/parkin_icons.dart';
 import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
+import '../../analytics/widgets/medication_trend_chart.dart';
 import '../../home/widgets/medication_log_sheet.dart';
-import '../../home/widgets/upcoming_feature_sheet.dart';
 
-/// Tab 1 (`/history`): Persisted Levodopa medication logs & screening session summaries.
-class HistoryTabScreen extends ConsumerWidget {
+enum HistoryRangeFilter {
+  days7('7 Hari'),
+  days30('30 Hari'),
+  all('Semua');
+
+  const HistoryRangeFilter(this.labelId);
+  final String labelId;
+}
+
+/// S-10 (`Tab 1 /history`): Longitudinal ON vs OFF medication FoG trend chart,
+/// range filters, session report drill-downs (S-09), medication log entries, and model metadata.
+class HistoryTabScreen extends ConsumerStatefulWidget {
   const HistoryTabScreen({super.key});
+
+  @override
+  ConsumerState<HistoryTabScreen> createState() => _HistoryTabScreenState();
+}
+
+class _HistoryTabScreenState extends ConsumerState<HistoryTabScreen> {
+  HistoryRangeFilter _rangeFilter = HistoryRangeFilter.all;
 
   static String _formatLocalTimestamp(DateTime utcTime) {
     final local = utcTime.toLocal();
@@ -25,10 +44,29 @@ class HistoryTabScreen extends ConsumerWidget {
     return '$day/$month/${local.year} · $hour:$minute';
   }
 
+  List<SessionSummaryItem> _applyFilter(
+    List<SessionSummaryItem> allSessions,
+    DateTime nowLocal,
+  ) {
+    if (_rangeFilter == HistoryRangeFilter.all || allSessions.isEmpty) {
+      return allSessions;
+    }
+    final cutoffDays = _rangeFilter == HistoryRangeFilter.days7 ? 7 : 30;
+    final cutoff = nowLocal.subtract(Duration(days: cutoffDays));
+    return allSessions
+        .where((s) => !s.startedAtUtc.toLocal().isBefore(cutoff))
+        .toList();
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final summary = ref.watch(
       homeDashboardControllerProvider.select((s) => s.summary),
+    );
+    final clock = ref.watch(homeDashboardClockProvider);
+    final filteredSessions = _applyFilter(
+      summary.recentSessions,
+      clock().toLocal(),
     );
 
     return Scaffold(
@@ -41,15 +79,51 @@ class HistoryTabScreen extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Riwayat & Log Obat',
+                ClinicalCopy.historyScreenTitle,
                 style: AppTypography.screenTitle(size: 24),
               ),
               const SizedBox(height: 6),
               Text(
-                'Pantau riwayat tes langkah 360° dan catatan konsumsi Levodopa ON/OFF Anda secara offline.',
+                'Pantau tren FoG saat ON/OFF Levodopa, buka laporan grafik & PDF tiap sesi, dan catat obat harian secara offline.',
                 style: AppTypography.bodyLarge(size: 14.5),
               ),
+              const SizedBox(height: 14),
+
+              // Filter Row (7 Hari | 30 Hari | Semua) with >= 56 dp hit height
+              Row(
+                children: [
+                  _FilterButton(
+                    key: const Key('history_filter_7d'),
+                    label: HistoryRangeFilter.days7.labelId,
+                    selected: _rangeFilter == HistoryRangeFilter.days7,
+                    onPressed: () =>
+                        setState(() => _rangeFilter = HistoryRangeFilter.days7),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterButton(
+                    key: const Key('history_filter_30d'),
+                    label: HistoryRangeFilter.days30.labelId,
+                    selected: _rangeFilter == HistoryRangeFilter.days30,
+                    onPressed: () => setState(
+                      () => _rangeFilter = HistoryRangeFilter.days30,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterButton(
+                    key: const Key('history_filter_all'),
+                    label: HistoryRangeFilter.all.labelId,
+                    selected: _rangeFilter == HistoryRangeFilter.all,
+                    onPressed: () =>
+                        setState(() => _rangeFilter = HistoryRangeFilter.all),
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
+
+              // Longitudinal ON/OFF Chart (S-10)
+              MedicationTrendChart(sessions: filteredSessions),
+              const SizedBox(height: 16),
+
               ParkinSecondaryIceButton(
                 key: const Key('history_log_med_button'),
                 title: 'Catat Obat Baru',
@@ -58,6 +132,108 @@ class HistoryTabScreen extends ConsumerWidget {
                 onPressed: () => showMedicationLogSheet(context),
               ),
               const SizedBox(height: 22),
+
+              Text(
+                'Sesi Skrining 360°',
+                style: AppTypography.cardTitle(size: 18),
+              ),
+              const SizedBox(height: 10),
+              if (filteredSessions.isEmpty)
+                ParkinEmptyStateCard(
+                  key: const Key('history_empty_state'),
+                  title: ClinicalCopy.emptyHistoryTitle,
+                  description: ClinicalCopy.emptyHistoryBody,
+                  ctaLabel: ClinicalCopy.emptyHistoryCta,
+                  onCtaPressed: () => context.push('/pre-flight'),
+                )
+              else
+                Column(
+                  children: [
+                    for (final session in filteredSessions) ...[
+                      Semantics(
+                        button: true,
+                        label:
+                            'Buka laporan detail sesi ${session.fogPercentage.toStringAsFixed(1)} persen FoG',
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 64),
+                          child: Material(
+                            color: AppColors.pureWhite,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              side: const BorderSide(
+                                color: AppColors.subtleBorderLight,
+                              ),
+                            ),
+                            child: InkWell(
+                              key: Key('history_session_${session.sessionId}'),
+                              borderRadius: BorderRadius.circular(18),
+                              onTap: () => context.push(
+                                '/session-report/${session.sessionId}',
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${session.fogPercentage.toStringAsFixed(1).replaceAll('.', ',')}% FoG',
+                                            style: AppTypography.cardTitle(
+                                              size: 18,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${_formatLocalTimestamp(session.startedAtUtc)} · ${session.episodeCount} Episode',
+                                            style: AppTypography.captionBadge(
+                                              color: AppColors.mutedSlate,
+                                              weight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.iceSurface,
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(
+                                          color: AppColors.skyCard,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        session.medState.labelId,
+                                        style: AppTypography.captionBadge(
+                                          color: AppColors.onIceAzure,
+                                          weight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    ParkinIcons.chevronRight(
+                                      color: AppColors.royalNavy,
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+
+              const SizedBox(height: 18),
               Text(
                 'Catatan Obat Terbaru',
                 style: AppTypography.cardTitle(size: 18),
@@ -91,80 +267,84 @@ class HistoryTabScreen extends ConsumerWidget {
                     ],
                   ],
                 ),
-              const SizedBox(height: 18),
-              Text(
-                'Sesi Skrining 360°',
-                style: AppTypography.cardTitle(size: 18),
-              ),
-              const SizedBox(height: 10),
-              if (summary.recentSessions.isEmpty)
-                ParkinEmptyStateCard(
-                  title: ClinicalCopy.emptyHistoryTitle,
-                  description: ClinicalCopy.emptyHistoryBody,
-                  ctaLabel: ClinicalCopy.emptyHistoryCta,
-                  onCtaPressed: () => showUpcomingFeatureSheet(
-                    context,
-                    flow: ParkinUpcomingFlow.tes360,
-                  ),
-                )
-              else
-                Column(
-                  children: [
-                    for (final session in summary.recentSessions) ...[
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.pureWhite,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: AppColors.subtleBorderLight),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${session.fogPercentage.toStringAsFixed(1).replaceAll('.', ',')}% FoG',
-                                    style: AppTypography.cardTitle(size: 18),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${_formatLocalTimestamp(session.startedAtUtc)} · ${session.episodeCount} Episode',
-                                    style: AppTypography.captionBadge(
-                                      color: AppColors.mutedSlate,
-                                      weight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.iceSurface,
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: AppColors.skyCard),
-                              ),
-                              child: Text(
-                                session.medState.labelId,
-                                style: AppTypography.captionBadge(
-                                  color: AppColors.onIceAzure,
-                                  weight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                  ],
+
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.iceSurface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.skyCard),
                 ),
+                child: Text(
+                  ClinicalCopy.historyModelMetadata,
+                  style: AppTypography.captionBadge(
+                    color: AppColors.onIceAzure,
+                    weight: FontWeight.w600,
+                  ),
+                ),
+              ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: 'Filter riwayat $label',
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Material(
+            color: selected ? AppColors.clinicalAzure : AppColors.pureWhite,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(
+                color: selected
+                    ? AppColors.clinicalAzure
+                    : AppColors.subtleBorderLight,
+                width: 1.5,
+              ),
+            ),
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      style: AppTypography.buttonLabel(
+                        color: selected
+                            ? AppColors.pureWhite
+                            : AppColors.royalNavy,
+                        size: 14.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),

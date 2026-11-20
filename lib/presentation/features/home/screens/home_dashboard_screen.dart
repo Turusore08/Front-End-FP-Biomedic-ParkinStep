@@ -18,7 +18,6 @@ import '../../../widgets/design_system/parkin_session_carousel_card.dart';
 import '../../../widgets/design_system/parkin_vertical_feature_card.dart';
 import '../widgets/medication_log_sheet.dart';
 import '../widgets/privacy_shield_sheet.dart';
-import '../widgets/upcoming_feature_sheet.dart';
 
 /// S-03: Patient Home Dashboard faithful to Figma v2 (`15:117`), `UI_UX_SPEC.md`,
 /// and Parkinson's high-contrast clinical visual clarity with WCAG 2.1 tokens.
@@ -189,10 +188,7 @@ class HomeDashboardScreen extends ConsumerWidget {
                           tiltRadians: -0.0873,
                           illustration: ParkinIcons.tes360Illustration(),
                           semanticLabel: 'Mulai Tes putar 360 derajat',
-                          onPressed: () => showUpcomingFeatureSheet(
-                            context,
-                            flow: ParkinUpcomingFlow.tes360,
-                          ),
+                          onPressed: () => context.push('/pre-flight'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -203,10 +199,7 @@ class HomeDashboardScreen extends ConsumerWidget {
                           tiltRadians: 0.0611,
                           illustration: ParkinIcons.cueingRasIllustration(),
                           semanticLabel: 'Buka Cueing Metronom RAS',
-                          onPressed: () => showUpcomingFeatureSheet(
-                            context,
-                            flow: ParkinUpcomingFlow.cueingRas,
-                          ),
+                          onPressed: () => context.push('/metronome'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -276,10 +269,7 @@ class HomeDashboardScreen extends ConsumerWidget {
                     onDismiss: () => ref
                         .read(homeDashboardControllerProvider.notifier)
                         .dismissDailyReminder(),
-                    onStart: () => showUpcomingFeatureSheet(
-                      context,
-                      flow: ParkinUpcomingFlow.tes360,
-                    ),
+                    onStart: () => context.push('/pre-flight'),
                   ),
                 ],
 
@@ -319,10 +309,7 @@ class HomeDashboardScreen extends ConsumerWidget {
                     description: ClinicalCopy.emptyHistoryBody,
                     ctaLabel: ClinicalCopy.emptyHistoryCta,
                     ctaKey: const Key('empty_start_first_test_button'),
-                    onCtaPressed: () => showUpcomingFeatureSheet(
-                      context,
-                      flow: ParkinUpcomingFlow.tes360,
-                    ),
+                    onCtaPressed: () => context.push('/pre-flight'),
                   )
                 else
                   SizedBox(
@@ -349,7 +336,9 @@ class HomeDashboardScreen extends ConsumerWidget {
                               '${_formatDecimalId(session.fogPercentage)}%',
                           progressFraction: fraction,
                           tone: tone,
-                          onTap: () => context.go('/history'),
+                          onTap: () => context.push(
+                            '/session-report/${session.sessionId}',
+                          ),
                         );
                       },
                     ),
@@ -395,10 +384,7 @@ class HomeDashboardScreen extends ConsumerWidget {
       'Belum Ada Tes',
       'Mulai Tes 360° 2 menit pertama Anda untuk melihat skor FoG',
       null,
-      () => showUpcomingFeatureSheet(
-        context,
-        flow: ParkinUpcomingFlow.tes360,
-      ),
+      () => context.push('/pre-flight'),
     );
   }
 }

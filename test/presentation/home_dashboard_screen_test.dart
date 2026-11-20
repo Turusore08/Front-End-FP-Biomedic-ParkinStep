@@ -139,7 +139,7 @@ void main() {
       await tester.tap(find.byKey(const Key('nav_tab_history')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Riwayat & Log Obat'), findsOneWidget);
+      expect(find.text('Riwayat & Tren Obat'), findsOneWidget);
       expect(find.text('Levodopa / Carbidopa (150 mg)'), findsOneWidget);
     });
 
@@ -201,7 +201,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('nav_tab_history')));
       await tester.pumpAndSettle();
-      expect(find.text('Riwayat & Log Obat'), findsOneWidget);
+      expect(find.text('Riwayat & Tren Obat'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('nav_tab_home')));
       await tester.pumpAndSettle();

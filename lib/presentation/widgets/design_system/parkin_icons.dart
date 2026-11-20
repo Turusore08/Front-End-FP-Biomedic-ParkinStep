@@ -297,6 +297,168 @@ abstract final class ParkinIcons {
     );
   }
 
+  static Widget arrowBack({
+    Color color = const Color(0xFF234085),
+    double size = 20,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M15 6L9 12L15 18" stroke="$hex" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget floorDry({
+    Color color = const Color(0xFF0077B6),
+    double size = 24,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M3.5 17.5H20.5" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '<path d="M5.5 14L8.5 11H15.5L18.5 14" stroke="$hex" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<path d="M9 7.5L11.2 9.7L15.2 5.7" stroke="$hex" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget radiusSpace({
+    Color color = const Color(0xFF0077B6),
+    double size = 24,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<circle cx="12" cy="12" r="8.5" stroke="$hex" stroke-width="2" stroke-dasharray="3.5 2.5"/>'
+      '<path d="M7.5 12H16.5" stroke="$hex" stroke-width="2" stroke-linecap="round"/>'
+      '<path d="M9.5 10L7 12L9.5 14" stroke="$hex" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<path d="M14.5 10L17 12L14.5 14" stroke="$hex" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget chairSupport({
+    Color color = const Color(0xFF0077B6),
+    double size = 24,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M7 5V13.5H16.5" stroke="$hex" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<path d="M7 13.5V19.5" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '<path d="M16.5 13.5V19.5" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '<path d="M7 9.5H13.5" stroke="$hex" stroke-width="2" stroke-linecap="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget cameraLegs({
+    Color color = const Color(0xFF0077B6),
+    double size = 24,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<rect x="3.5" y="6.5" width="13.5" height="11" rx="2.5" stroke="$hex" stroke-width="2"/>'
+      '<path d="M17 10L20.5 8V16L17 14" stroke="$hex" stroke-width="2" stroke-linejoin="round"/>'
+      '<circle cx="10.2" cy="12" r="2.2" stroke="$hex" stroke-width="1.8"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget chevronUp({
+    Color color = const Color(0xFFFFFFFF),
+    double size = 24,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M6.5 14.5L12 9L17.5 14.5" stroke="$hex" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget chevronDown({
+    Color color = const Color(0xFFFFFFFF),
+    double size = 24,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M6.5 9.5L12 15L17.5 9.5" stroke="$hex" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget playTriangle({
+    Color color = const Color(0xFF0077B6),
+    double size = 22,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M8 6.5L18 12L8 17.5V6.5Z" stroke="$hex" stroke-width="2.2" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget stopSquare({
+    Color color = const Color(0xFFDC2626),
+    double size = 20,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<rect x="6.5" y="6.5" width="11" height="11" rx="2.5" stroke="$hex" stroke-width="2.2"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget soundMuted({
+    Color color = const Color(0xFF64748B),
+    double size = 22,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M4 9.8V14.2H7.8L12.5 18V6L7.8 9.8H4Z" stroke="$hex" stroke-width="2" stroke-linejoin="round"/>'
+      '<path d="M16 9.5L20 14.5" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '<path d="M20 9.5L16 14.5" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
   static String _toHex(Color c) {
     final r = (c.r * 255).round().toRadixString(16).padLeft(2, '0');
     final g = (c.g * 255).round().toRadixString(16).padLeft(2, '0');
