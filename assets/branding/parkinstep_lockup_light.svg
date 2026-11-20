@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 640 160"
+     width="640"
+     height="160"
+     role="img"
+     aria-labelledby="lockup-light-title">
+  <title id="lockup-light-title">ParkinStep Horizontal Lockup (Light Background)</title>
+
+  <defs>
+    <linearGradient id="lockup-light-azure" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00A9EC" />
+      <stop offset="100%" stop-color="#0077B6" />
+    </linearGradient>
+    <linearGradient id="lockup-light-aqua" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0EA5E9" />
+      <stop offset="100%" stop-color="#1AEAD8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Emblem P+S ditempatkan rapi di slot 16..144 -->
+  <g id="emblem" transform="translate(80, 80) scale(0.24) translate(-508, -499)">
+    <path d="M 298 672 C 354 672, 392 634, 392 574 L 392 326 L 484 326 C 554 326, 602 368, 602 430 C 602 492, 554 534, 484 534 L 392 534"
+          fill="none"
+          stroke="url(#lockup-light-azure)"
+          stroke-width="80"
+          stroke-linecap="round"
+          stroke-linejoin="round" />
+    <path d="M 476 672 C 546 672, 574 618, 602 570 C 630 522, 662 492, 718 492"
+          fill="none"
+          stroke="url(#lockup-light-aqua)"
+          stroke-width="76"
+          stroke-linecap="round" />
+  </g>
+
+  <!-- Wordmark Dual-Tone WCAG AA/AAA untuk latar putih (#FFFFFF) -->
+  <text x="176" y="102"
+        font-family="'Plus Jakarta Sans', 'Nunito', 'Inter', sans-serif"
+        font-size="68"
+        font-weight="800"
+        letter-spacing="-1.5">
+    <tspan fill="#234085">Parkin</tspan><tspan fill="#0077B6">Step</tspan>
+  </text>
+</svg>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1024 1024"
+     width="1024"
+     height="1024"
+     role="img"
+     aria-labelledby="parkinstep-icon-title parkinstep-icon-desc">
+  <title id="parkinstep-icon-title">ParkinStep App Icon Master (Concept A)</title>
+  <desc id="parkinstep-icon-desc">
+    Master vektor Konsep A: monogram P melangkah dinamis (#00A9EC) dan gelombang irama S (#1AEAD8)
+    di atas latar Deep Midnight Navy (#0B1B2B), berada 100% di dalam Adaptive Icon Safe Zone (radius ≤ 338 px).
+  </desc>
+
+  <defs>
+    <linearGradient id="parkinstep-bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1B2B" />
+      <stop offset="100%" stop-color="#132A45" />
+    </linearGradient>
+    <linearGradient id="parkinstep-azure-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00A9EC" />
+      <stop offset="100%" stop-color="#0090D4" />
+    </linearGradient>
+    <linearGradient id="parkinstep-aqua-wave" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1AEAD8" />
+      <stop offset="100%" stop-color="#4DF4E4" />
+    </linearGradient>
+  </defs>
+
+  <g id="background">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#parkinstep-bg-grad)" />
+  </g>
+
+  <g id="logo-mark">
+    <!-- Monogram P Stride (radius terluar ~320 px dari pusat 512,512) -->
+    <path d="M 298 672 C 354 672, 392 634, 392 574 L 392 326 L 484 326 C 554 326, 602 368, 602 430 C 602 492, 554 534, 484 534 L 392 534"
+          fill="none"
+          stroke="url(#parkinstep-azure-grad)"
+          stroke-width="76"
+          stroke-linecap="round"
+          stroke-linejoin="round" />
+
+    <!-- Gelombang Irama RAS berbentuk S -->
+    <path d="M 476 672 C 546 672, 574 618, 602 570 C 630 522, 662 492, 718 492"
+          fill="none"
+          stroke="url(#parkinstep-aqua-wave)"
+          stroke-width="72"
+          stroke-linecap="round" />
+  </g>
+</svg>

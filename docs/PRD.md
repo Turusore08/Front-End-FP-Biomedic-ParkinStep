@@ -3,7 +3,7 @@
 > **Status Dokumen:** Draft Final Pre-Development (v1.0)  
 > **Tanggal:** 2026-11-20  
 > **Repositori Terkait:** `Front-End-FP-Biomedic-ParkinStep` (Frontend Mobile) & `../FP-BIOMEDIC---Parkinson-Mobile-FOG` (ML Research Pipeline)  
-> **Catatan UI/UX:** Spesifikasi visual & ergonomi antarmuka pada [UI_UX_SPEC.md](./UI_UX_SPEC.md) **`[TBD — Dalam tahap riset desain oleh tim]`** dan sengaja dikosongkan.
+> **Catatan UI/UX:** Spesifikasi visual & ergonomi antarmuka pada [UI_UX_SPEC.md](./UI_UX_SPEC.md) (v1.0 — Selaras Referensi Beats Medical di `contoh/` + Konsep Logo A).
 
 ---
 
@@ -105,5 +105,5 @@
 - **Kontrak API Backend & WebSocket:** [API_CONTRACT.md](./API_CONTRACT.md)
 - **Penyimpanan Lokal & Sinkronisasi:** [LOCAL_STORAGE_AND_SYNC.md](./LOCAL_STORAGE_AND_SYNC.md)
 - **Rencana Pengujian & Benchmark 14 Trial:** [TESTING_AND_BENCHMARK_PLAN.md](./TESTING_AND_BENCHMARK_PLAN.md)
-- **Spesifikasi UI/UX & Aksesibilitas:** [UI_UX_SPEC.md](./UI_UX_SPEC.md) **`[TBD — Dikosongkan sementara selama fase riset desain]`**
+- **Spesifikasi UI/UX & Aksesibilitas:** [UI_UX_SPEC.md](./UI_UX_SPEC.md) (v1.0 — Selaras Referensi `contoh/`)
 - **Aturan Pengembangan & Guardrails Agent:** [AGENT_RULES.md](../AGENT_RULES.md)

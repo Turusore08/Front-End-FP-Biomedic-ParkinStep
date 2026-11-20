@@ -18,7 +18,7 @@ Sebelum membuat atau mengubah kode fitur apa pun, wajib merujuk dokumen berikut:
 - Spesifikasi UI/UX: [docs/UI_UX_SPEC.md](./docs/UI_UX_SPEC.md)
 
 > **ATURAN KHUSUS `docs/UI_UX_SPEC.md`:**  
-> File `docs/UI_UX_SPEC.md` **sengaja dikosongkan** karena desain antarmuka sedang dalam tahap riset. **DILARANG mengarang, mengisi, atau mengunci spesifikasi desain visual final di `docs/UI_UX_SPEC.md` maupun mengimplementasikan layout UI final sebelum dokumen tersebut diisi atau diinstruksikan langsung oleh pemilik proyek.**
+> Seluruh implementasi antarmuka, komponen desain, token warna (`#0B1B2B`, `#234085`, `#00A9EC`, `#0077B6`, `#1AEAD8`, `#D8F1FC`), aksesibilitas tremor (`>= 56–64 dp`, tanpa slider/swipe wajib), serta *Live Skeleton HUD* wajib mengikuti [docs/UI_UX_SPEC.md](./docs/UI_UX_SPEC.md) yang selaras dengan referensi `contoh/` dan memakai identitas merek **Konsep A (`P+S` Kinetic Stride)**. Dilarang meniru logo `BM` atau elemen non-ParkinStep dari screenshot referensi.
 
 ---
 

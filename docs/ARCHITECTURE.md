@@ -3,7 +3,7 @@
 > **Status Dokumen:** Blueprint Arsitektur Implementasi (v1.0)  
 > **Tanggal:** 2026-11-20  
 > **Pola Arsitektur:** Clean Architecture + Domain-Driven Design (DDD) + Native C++17 Edge-AI Core  
-> **Catatan UI/UX:** Detail widget visual dan layout layar pada [UI_UX_SPEC.md](./UI_UX_SPEC.md) **`[TBD — Dalam tahap riset desain oleh tim]`**; dokumen ini hanya mendefinisikan batas modul, kontrak data, *state machine*, dan *threading*.
+> **Catatan UI/UX:** Detail widget visual, token desain, komponen, dan blueprint 10 layar mengacu pada [UI_UX_SPEC.md](./UI_UX_SPEC.md) (v1.0 — Selaras Referensi `contoh/`); dokumen ini mendefinisikan batas modul, kontrak data, *state machine*, dan *threading*.
 
 ---
 
