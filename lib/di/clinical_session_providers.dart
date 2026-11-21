@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/controllers/clinical_session_coordinator.dart';
@@ -7,6 +9,7 @@ import '../application/ports/emergency_alert_port.dart';
 import '../domain/enums/medication_state.dart';
 import '../domain/enums/preview_gait_scenario.dart';
 import '../infrastructure/cueing/local_emergency_alert_adapter.dart';
+import '../infrastructure/edge_ai/onnx_pose_inference_adapter.dart';
 import '../infrastructure/edge_ai/preview_pose_inference_adapter.dart';
 import 'dashboard_providers.dart';
 import 'onboarding_providers.dart';
@@ -18,8 +21,21 @@ final previewPoseAdapterProvider = Provider<PreviewPoseInferenceAdapter>((ref) {
   return adapter;
 });
 
+/// Selects the edge inference backend at build time:
+/// `--dart-define=PARKIN_EDGE_MODE=onnx` runs the on-device YOLO pose model,
+/// anything else keeps the deterministic synthetic preview.
+const String _edgeMode = String.fromEnvironment('PARKIN_EDGE_MODE');
+
+final onnxPoseAdapterProvider = Provider<OnnxPoseInferenceAdapter>((ref) {
+  final adapter = OnnxPoseInferenceAdapter();
+  ref.onDispose(() => unawaited(adapter.dispose()));
+  return adapter;
+});
+
 final edgeInferencePortProvider = Provider<EdgeInferencePort>(
-  (ref) => ref.watch(previewPoseAdapterProvider),
+  (ref) => _edgeMode == 'onnx'
+      ? ref.watch(onnxPoseAdapterProvider)
+      : ref.watch(previewPoseAdapterProvider),
 );
 
 final emergencyAlertPortProvider = Provider<EmergencyAlertPort>(
@@ -45,7 +61,9 @@ class ClinicalSessionController extends Notifier<ClinicalSessionUiState> {
     );
     ref.onDispose(_coordinator.cancelTimersAndStreamsOnly);
     return ClinicalSessionUiState(
-      isPreviewSimulation: ref.read(edgeInferencePortProvider).isPreviewSimulation,
+      isPreviewSimulation: ref
+          .read(edgeInferencePortProvider)
+          .isPreviewSimulation,
     );
   }
 
@@ -71,5 +89,5 @@ class ClinicalSessionController extends Notifier<ClinicalSessionUiState> {
 
 final clinicalSessionControllerProvider =
     NotifierProvider<ClinicalSessionController, ClinicalSessionUiState>(
-  ClinicalSessionController.new,
-);
+      ClinicalSessionController.new,
+    );

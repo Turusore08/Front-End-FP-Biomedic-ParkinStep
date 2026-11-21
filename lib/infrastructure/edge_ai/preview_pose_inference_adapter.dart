@@ -19,9 +19,7 @@ class PreviewPoseInferenceAdapter implements EdgeInferencePort {
   bool get isPreviewSimulation => true;
 
   @override
-  Stream<LiveFrameResult> startLiveStream({
-    required MedicationState medState,
-  }) {
+  Stream<LiveFrameResult> startLiveStream({required MedicationState medState}) {
     _cancelTimerAndClose();
     _scenario = PreviewGaitScenario.normalGait;
     _seq = 0;
@@ -35,14 +33,11 @@ class PreviewPoseInferenceAdapter implements EdgeInferencePort {
       }
     });
 
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 66),
-      (_) {
-        if (!controller.isClosed) {
-          controller.add(_buildFrame());
-        }
-      },
-    );
+    _timer = Timer.periodic(const Duration(milliseconds: 66), (_) {
+      if (!controller.isClosed) {
+        controller.add(_buildFrame());
+      }
+    });
     return controller.stream;
   }
 
@@ -143,8 +138,16 @@ class PreviewPoseInferenceAdapter implements EdgeInferencePort {
       Keypoint2D(x: 250, y: 112 + hipDropOffset, conf: upperConf), // 2 R_Eye
       Keypoint2D(x: 218, y: 118 + hipDropOffset, conf: upperConf), // 3 L_Ear
       Keypoint2D(x: 262, y: 118 + hipDropOffset, conf: upperConf), // 4 R_Ear
-      Keypoint2D(x: 196, y: 185 + hipDropOffset, conf: upperConf), // 5 L_Shoulder
-      Keypoint2D(x: 284, y: 185 + hipDropOffset, conf: upperConf), // 6 R_Shoulder
+      Keypoint2D(
+        x: 196,
+        y: 185 + hipDropOffset,
+        conf: upperConf,
+      ), // 5 L_Shoulder
+      Keypoint2D(
+        x: 284,
+        y: 185 + hipDropOffset,
+        conf: upperConf,
+      ), // 6 R_Shoulder
       Keypoint2D(x: 176, y: 260 + hipDropOffset, conf: upperConf), // 7 L_Elbow
       Keypoint2D(x: 304, y: 260 + hipDropOffset, conf: upperConf), // 8 R_Elbow
       Keypoint2D(x: 170, y: 325 + hipDropOffset, conf: upperConf), // 9 L_Wrist
