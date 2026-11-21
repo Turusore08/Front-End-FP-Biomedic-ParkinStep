@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'dart:ui' as ui;
-
+import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,13 +34,13 @@ final onnxPoseAdapterProvider = Provider<OnnxPoseInferenceAdapter>((ref) {
   return adapter;
 });
 
-/// Last analysed camera frame (the one the skeleton was detected on);
-/// `null` in synthetic preview mode.
-final liveAnalyzedFrameProvider = Provider<ValueListenable<ui.Image?>?>(
-  (ref) => _edgeMode == 'onnx'
-      ? ref.watch(onnxPoseAdapterProvider).analyzedFrame
-      : null,
-);
+/// Live back-camera controller for `CameraPreview`; `null` in synthetic preview mode.
+final liveCameraControllerProvider =
+    Provider<ValueListenable<CameraController?>?>(
+      (ref) => _edgeMode == 'onnx'
+          ? ref.watch(onnxPoseAdapterProvider).cameraController
+          : null,
+    );
 
 final edgeInferencePortProvider = Provider<EdgeInferencePort>(
   (ref) => _edgeMode == 'onnx'

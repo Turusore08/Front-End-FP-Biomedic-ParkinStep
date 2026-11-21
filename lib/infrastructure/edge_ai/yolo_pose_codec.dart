@@ -90,60 +90,33 @@ abstract final class YoloPoseCodec {
 
   /// Converts a YUV frame into the rotated, letterboxed NCHW RGB tensor.
   /// Uses nearest-neighbour sampling (Ultralytics uses bilinear resize).
-  static YoloInput preprocess(YuvFrame frame) => preprocessRgba(
-    yuvToUprightRgba(frame),
-    frame.uprightWidth,
-    frame.uprightHeight,
-  );
+  static YoloInput preprocess(YuvFrame frame) {
+    final meta = letterboxFor(frame.uprightWidth, frame.uprightHeight);
+    const plane = inputSize * inputSize;
+    final tensor = Float32List(3 * plane)..fillRange(0, 3 * plane, _padValue);
 
-  /// Rotates a YUV frame upright and converts it to packed RGBA8888, the same
-  /// pixels the UI displays so the skeleton is drawn on the frame it came from.
-  static Uint8List yuvToUprightRgba(YuvFrame frame) {
-    final w = frame.uprightWidth;
-    final h = frame.uprightHeight;
-    final rgba = Uint8List(w * h * 4);
-    var o = 0;
-    for (var ry = 0; ry < h; ry++) {
-      for (var rx = 0; rx < w; rx++) {
+    final newW = (meta.imageWidth * meta.scale).round();
+    final newH = (meta.imageHeight * meta.scale).round();
+    final maxX = meta.imageWidth - 1;
+    final maxY = meta.imageHeight - 1;
+
+    for (var oy = 0; oy < newH; oy++) {
+      final ry = _clamp(((oy + 0.5) / meta.scale).floor(), maxY);
+      final rowBase = (oy + meta.padTop) * inputSize + meta.padLeft;
+      for (var ox = 0; ox < newW; ox++) {
+        final rx = _clamp(((ox + 0.5) / meta.scale).floor(), maxX);
         final (sx, sy) = _uprightToSensor(frame, rx, ry);
+
         final y = frame.yBytes[sy * frame.yRowStride + sx];
         final uvIndex =
             (sy >> 1) * frame.uvRowStride + (sx >> 1) * frame.uvPixelStride;
         final u = frame.uBytes[uvIndex] - 128;
         final v = frame.vBytes[uvIndex] - 128;
-        rgba[o] = _byte(y + 1.402 * v);
-        rgba[o + 1] = _byte(y - 0.344136 * u - 0.714136 * v);
-        rgba[o + 2] = _byte(y + 1.772 * u);
-        rgba[o + 3] = 255;
-        o += 4;
-      }
-    }
-    return rgba;
-  }
 
-  /// Letterboxes an upright RGBA8888 image into the NCHW RGB 0..1 tensor.
-  static YoloInput preprocessRgba(Uint8List rgba, int width, int height) {
-    final meta = letterboxFor(width, height);
-    const plane = inputSize * inputSize;
-    final tensor = Float32List(3 * plane)..fillRange(0, 3 * plane, _padValue);
-
-    final newW = (width * meta.scale).round();
-    final newH = (height * meta.scale).round();
-    final maxX = width - 1;
-    final maxY = height - 1;
-    const inv255 = 1 / 255;
-
-    for (var oy = 0; oy < newH; oy++) {
-      final ry = _clamp(((oy + 0.5) / meta.scale).floor(), maxY);
-      final rowBase = (oy + meta.padTop) * inputSize + meta.padLeft;
-      final srcRow = ry * width;
-      for (var ox = 0; ox < newW; ox++) {
-        final rx = _clamp(((ox + 0.5) / meta.scale).floor(), maxX);
-        final src = (srcRow + rx) * 4;
         final idx = rowBase + ox;
-        tensor[idx] = rgba[src] * inv255;
-        tensor[plane + idx] = rgba[src + 1] * inv255;
-        tensor[2 * plane + idx] = rgba[src + 2] * inv255;
+        tensor[idx] = _unit(y + 1.402 * v);
+        tensor[plane + idx] = _unit(y - 0.344136 * u - 0.714136 * v);
+        tensor[2 * plane + idx] = _unit(y + 1.772 * u);
       }
     }
     return YoloInput(tensor: tensor, meta: meta);
@@ -203,10 +176,10 @@ abstract final class YoloPoseCodec {
     };
   }
 
-  static int _byte(double c) {
+  static double _unit(double c) {
     if (c <= 0) return 0;
-    if (c >= 255) return 255;
-    return c.round();
+    if (c >= 255) return 1;
+    return c / 255;
   }
 
   static int _clamp(int v, int max) => v < 0 ? 0 : (v > max ? max : v);

@@ -14,7 +14,6 @@ class PoseWorkerResult {
   const PoseWorkerResult({
     required this.keypoints,
     required this.meta,
-    required this.rgba,
     required this.preprocessMs,
     required this.inferenceMs,
   });
@@ -22,15 +21,11 @@ class PoseWorkerResult {
   /// Main person's 17 COCO keypoints in upright image pixels, or `null`.
   final List<Keypoint2D>? keypoints;
   final LetterboxMeta meta;
-
-  /// Upright RGBA8888 pixels of the analysed frame
-  /// (`meta.imageWidth` x `meta.imageHeight`).
-  final TransferableTypedData rgba;
   final int preprocessMs;
   final int inferenceMs;
 }
 
-/// Long-lived background isolate running YUV -> RGBA -> letterbox ->
+/// Long-lived background isolate running YUV -> letterbox ->
 /// `yolo26n-pose.onnx` -> main-person decode for each frame, so the UI isolate
 /// never touches per-pixel work or the 56x8400 output tensor.
 ///
@@ -141,12 +136,7 @@ class PoseWorker {
     YuvFrame frame,
   ) {
     final watch = Stopwatch()..start();
-    final rgba = YoloPoseCodec.yuvToUprightRgba(frame);
-    final input = YoloPoseCodec.preprocessRgba(
-      rgba,
-      frame.uprightWidth,
-      frame.uprightHeight,
-    );
+    final input = YoloPoseCodec.preprocess(frame);
     final preprocessMs = watch.elapsedMilliseconds;
 
     final inputValue = OrtValueTensor.createTensorWithDataList(
@@ -179,7 +169,6 @@ class PoseWorker {
           ? null
           : YoloPoseCodec.decodeMainPerson(output, input.meta),
       meta: input.meta,
-      rgba: TransferableTypedData.fromList(<TypedData>[rgba]),
       preprocessMs: preprocessMs,
       inferenceMs: inferenceMs,
     );

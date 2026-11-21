@@ -1,34 +1,43 @@
-import 'dart:ui' as ui;
-
+import 'package:camera/camera.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../../di/clinical_session_providers.dart';
 
-/// Upright back-camera frame filling its parent with `BoxFit.cover`, matching
+/// Upright back-camera feed filling its parent with `BoxFit.cover`, matching
 /// `CameraCoordinateMapper` so the skeleton HUD lines up with the body.
-///
-/// Shows the frame the current skeleton was detected on rather than a live
-/// `CameraPreview`, so picture and skeleton are always in sync.
-/// Renders nothing in synthetic preview mode or before the first frame.
+/// Renders nothing in synthetic preview mode or before the camera is ready.
 class LiveCameraBackdrop extends ConsumerWidget {
   const LiveCameraBackdrop({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final listenable = ref.watch(liveAnalyzedFrameProvider);
+    final listenable = ref.watch(liveCameraControllerProvider);
     if (listenable == null) return const SizedBox.shrink();
 
-    return ValueListenableBuilder<ui.Image?>(
+    return ValueListenableBuilder<CameraController?>(
       valueListenable: listenable,
-      builder: (context, image, _) {
-        if (image == null) return const SizedBox.shrink();
+      builder: (context, camera, _) {
+        if (camera == null || !camera.value.isInitialized) {
+          return const SizedBox.shrink();
+        }
+        final previewSize = camera.value.previewSize;
+        if (previewSize == null) return const SizedBox.shrink();
+
+        // previewSize is reported in sensor (landscape) orientation; the
+        // portrait preview is its transpose.
+        final uprightW = previewSize.shortestSide;
+        final uprightH = previewSize.longestSide;
+
         return ExcludeSemantics(
           child: ClipRect(
-            child: RawImage(
-              image: image,
+            child: FittedBox(
               fit: BoxFit.cover,
-              filterQuality: FilterQuality.low,
+              child: SizedBox(
+                width: uprightW,
+                height: uprightH,
+                child: CameraPreview(camera),
+              ),
             ),
           ),
         );

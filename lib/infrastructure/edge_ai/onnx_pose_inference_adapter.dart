@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -25,10 +24,6 @@ import 'yolo_pose_codec.dart';
 ///
 /// Each emitted frame carries the most recent window's [LiveFrameResult.rawProb],
 /// [LiveFrameResult.freezeIndex] and quality flag; they refresh once per stride.
-///
-/// The UI shows [analyzedFrame] instead of a live `CameraPreview`: it is the
-/// exact frame the keypoints were detected on, so the skeleton never lags the
-/// picture underneath it.
 class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   OnnxPoseInferenceAdapter({
     this.modelAssetPath = 'assets/models/yolo26n-pose.onnx',
@@ -43,8 +38,8 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   static const double _minReliableFps = 12.0;
   static const List<int> _lb6Indices = <int>[11, 12, 13, 14, 15, 16];
 
-  CameraController? _camera;
-  final ValueNotifier<ui.Image?> _frameImage = ValueNotifier<ui.Image?>(null);
+  final ValueNotifier<CameraController?> _camera =
+      ValueNotifier<CameraController?>(null);
   OrtSession? _session;
   PoseWorker? _worker;
   final FogFeatureExtractor _fog = FogFeatureExtractor();
@@ -63,9 +58,9 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   int _lastProcessedMs = 0;
   double _fpsEma = 0;
 
-  /// Upright image of the most recently analysed frame, published together
-  /// with its [LiveFrameResult]; `null` when no live stream runs.
-  ValueListenable<ui.Image?> get analyzedFrame => _frameImage;
+  /// Initialized back camera while a live stream runs, `null` otherwise.
+  /// The UI listens to this to render a `CameraPreview` under the skeleton HUD.
+  ValueListenable<CameraController?> get cameraController => _camera;
 
   @override
   bool get isPreviewSimulation => false;
@@ -108,7 +103,7 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     _session?.release();
     _session = null;
     _classifier.release();
-    _frameImage.dispose();
+    _camera.dispose();
   }
 
   Future<void> _start(StreamController<LiveFrameResult> controller) async {
@@ -119,7 +114,7 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
         await camera.dispose();
         return;
       }
-      _camera = camera;
+      _camera.value = camera;
       await camera.startImageStream(
         (image) => _onImage(image, camera.description, controller),
       );
@@ -193,20 +188,10 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     try {
       final result = await worker.process(frame);
       final meta = result.meta;
-      final image = await _decodeRgba(
-        result.rgba.materialize().asUint8List(),
-        meta.imageWidth,
-        meta.imageHeight,
-      );
-      if (controller.isClosed) {
-        image.dispose();
-        return;
-      }
+      if (controller.isClosed) return;
 
       final keypoints = result.keypoints ?? _emptyKeypoints;
       _updateFogWindow(keypoints);
-      // Publish picture and skeleton in the same event so they paint together.
-      _publishFrameImage(image);
       controller.add(_buildResult(keypoints, meta, startedMs));
       if (!kReleaseMode && _seq % 30 == 1) {
         debugPrint(
@@ -218,29 +203,6 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
       if (kDebugMode) debugPrint('ONNX pose inference failed: $error');
       if (!controller.isClosed) controller.addError(error, stack);
     }
-  }
-
-  static Future<ui.Image> _decodeRgba(Uint8List rgba, int width, int height) {
-    final completer = Completer<ui.Image>();
-    ui.decodeImageFromPixels(
-      rgba,
-      width,
-      height,
-      ui.PixelFormat.rgba8888,
-      completer.complete,
-    );
-    return completer.future;
-  }
-
-  /// Swaps the displayed frame; the previous image is disposed only after the
-  /// next frame has been drawn, since `RawImage` clones it during that frame.
-  void _publishFrameImage(ui.Image? image) {
-    final previous = _frameImage.value;
-    _frameImage.value = image;
-    if (previous == null) return;
-    SchedulerBinding.instance
-      ..addPostFrameCallback((_) => previous.dispose())
-      ..scheduleFrame();
   }
 
   /// Buffers the frame; when a window is due, runs the DSP + features in a
@@ -335,15 +297,16 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   }
 
   Future<void> _stopCameraAndClose() async {
-    final camera = _camera;
-    _camera = null;
-    _publishFrameImage(null);
+    final camera = _camera.value;
+    _camera.value = null;
     final controller = _controller;
     _controller = null;
     if (controller != null && !controller.isClosed) {
       await controller.close();
     }
     if (camera == null) return;
+    // Let the UI drop its CameraPreview before the controller is disposed.
+    await SchedulerBinding.instance.endOfFrame;
     if (camera.value.isStreamingImages) {
       await camera.stopImageStream();
     }
