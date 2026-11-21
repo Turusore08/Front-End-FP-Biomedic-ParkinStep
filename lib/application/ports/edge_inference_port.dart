@@ -6,6 +6,10 @@ import '../../domain/enums/preview_gait_scenario.dart';
 abstract interface class EdgeInferencePort {
   bool get isPreviewSimulation;
 
+  /// Loads models ahead of [startLiveStream] so the camera screen opens
+  /// without a model-loading stall. Safe to call repeatedly.
+  Future<void> warmUp();
+
   Stream<LiveFrameResult> startLiveStream({
     required MedicationState medState,
   });

@@ -135,8 +135,13 @@ void main() {
         await tester.pump(const Duration(seconds: 1));
       }
 
-      // Now on S-06 Live Recording HUD
+      // Now on S-06 Live Recording HUD: full-screen camera, panel collapsed
       expect(find.byKey(const Key('live_risk_gauge')), findsOneWidget);
+      expect(find.byKey(const Key('live_progress_pill')), findsOneWidget);
+      expect(find.byKey(const Key('live_control_panel')), findsNothing);
+      await tester.tap(find.byKey(const Key('live_panel_toggle')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('live_control_panel')), findsOneWidget);
       expect(find.byKey(const Key('live_highlight_prompt')), findsOneWidget);
       expect(find.text('NORMAL GAIT'), findsOneWidget);
 
@@ -172,6 +177,8 @@ void main() {
       await tester.tap(find.byKey(const Key('fall_guard_im_ok_button')));
       await tester.pump();
       expect(find.byKey(const Key('fall_guard_screen')), findsNothing);
+      await tester.tap(find.byKey(const Key('live_panel_toggle')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('live_finish_test_button')), findsOneWidget);
 
       // Finish session -> postSessionAnalyzing -> summaryReady
@@ -246,6 +253,9 @@ void main() {
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(seconds: 1));
       }
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const Key('live_panel_toggle')));
+      await tester.pump(const Duration(milliseconds: 300));
       expect(tester.takeException(), isNull);
       final finishSize =
           tester.getSize(find.byKey(const Key('live_finish_test_button')));

@@ -20,7 +20,6 @@ import '../../../widgets/design_system/parkin_highlight_prompt.dart';
 import '../../../widgets/design_system/parkin_icons.dart';
 import '../../../widgets/design_system/parkin_primary_pill_button.dart';
 import '../../../widgets/design_system/parkin_progress_pill.dart';
-import '../../../widgets/design_system/parkin_risk_gauge.dart';
 import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
 import '../../../widgets/design_system/parkin_state_cards.dart';
 import '../painters/skeleton_hud_painter.dart';
@@ -384,7 +383,10 @@ class _FramingAndCalibrationView extends StatelessWidget {
   }
 }
 
-class _LiveRecordingHudView extends StatelessWidget {
+/// S-06 full-screen camera HUD. The live preview fills the screen; FoG risk
+/// sits on the right edge, session progress at the top centre, and the
+/// control panel (prompt, finish button) slides in only when requested.
+class _LiveRecordingHudView extends StatefulWidget {
   const _LiveRecordingHudView({
     required this.uiState,
     required this.onFinishTest,
@@ -396,195 +398,344 @@ class _LiveRecordingHudView extends StatelessWidget {
   final ValueChanged<PreviewGaitScenario> onScenarioSelected;
 
   @override
+  State<_LiveRecordingHudView> createState() => _LiveRecordingHudViewState();
+}
+
+class _LiveRecordingHudViewState extends State<_LiveRecordingHudView> {
+  bool _panelOpen = false;
+
+  static const List<Shadow> _overlayTextShadow = <Shadow>[
+    Shadow(color: Color(0xCC000000), blurRadius: 6),
+    Shadow(color: Color(0x99000000), blurRadius: 2, offset: Offset(0, 1)),
+  ];
+
+  @override
   Widget build(BuildContext context) {
+    final uiState = widget.uiState;
     final fsm = uiState.fsm;
     final frame = fsm.latestFrame;
-    final compact = MediaQuery.sizeOf(context).height < 700;
-    final viewportHeight = compact ? 190.0 : 250.0;
 
     final (badgeBg, badgeFg) = switch (fsm.alertTier) {
-      AlertTier.gaitNormal => (AppColors.emeraldSoftBg, AppColors.emeraldDarkText),
-      AlertTier.earlyWarning => (AppColors.amberSoftBg, AppColors.amberDarkText),
+      AlertTier.gaitNormal => (
+        AppColors.emeraldSoftBg,
+        AppColors.emeraldDarkText,
+      ),
+      AlertTier.earlyWarning => (
+        AppColors.amberSoftBg,
+        AppColors.amberDarkText,
+      ),
       AlertTier.fogConfirmed => (AppColors.alertRed, AppColors.pureWhite),
       AlertTier.fallGuard => (AppColors.alertRed, AppColors.pureWhite),
     };
 
     final (promptWord, promptTail) = switch (fsm.alertTier) {
       AlertTier.gaitNormal => (
-          ClinicalCopy.livePromptNormalHighlight,
-          ClinicalCopy.livePromptNormalTail,
-        ),
+        ClinicalCopy.livePromptNormalHighlight,
+        ClinicalCopy.livePromptNormalTail,
+      ),
       AlertTier.earlyWarning => (
-          ClinicalCopy.livePromptWarningHighlight,
-          ClinicalCopy.livePromptWarningTail,
-        ),
+        ClinicalCopy.livePromptWarningHighlight,
+        ClinicalCopy.livePromptWarningTail,
+      ),
       AlertTier.fogConfirmed || AlertTier.fallGuard => (
-          ClinicalCopy.livePromptFogHighlight,
-          ClinicalCopy.livePromptFogTail,
-        ),
+        ClinicalCopy.livePromptFogHighlight,
+        ClinicalCopy.livePromptFogTail,
+      ),
     };
+
+    final riskColor = switch (fsm.alertTier) {
+      AlertTier.gaitNormal => AppColors.normalEmerald,
+      AlertTier.earlyWarning => AppColors.warningAmber,
+      AlertTier.fogConfirmed || AlertTier.fallGuard => AppColors.alertRed,
+    };
+    final riskPct = ((frame?.calibratedRiskScore ?? 0.0) * 100)
+        .clamp(0, 100)
+        .round();
+
+    final prompt = ParkinHighlightPrompt(
+      key: const Key('live_highlight_prompt'),
+      highlightWord: promptWord,
+      instructionTail: promptTail,
+    );
+    // Cue instructions matter clinically: keep them on screen during a
+    // warning/FoG even while the control panel is collapsed.
+    final showFloatingPrompt =
+        !_panelOpen && fsm.alertTier != AlertTier.gaitNormal;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: AppColors.midnightNavy,
-        body: SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Top Camera & 60 FPS Skeleton Overlay Viewport
-                SizedBox(
-                  height: viewportHeight,
-                  child: Stack(
-                    children: [
-                      const Positioned.fill(child: LiveCameraBackdrop()),
-                      Positioned.fill(
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            painter: SkeletonHudPainter(
-                              frame: frame,
-                              alertTier: fsm.alertTier,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Flexible(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.darkElevated,
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                        color: AppColors.subtleBorderDark,
-                                      ),
-                                    ),
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        '${ParkinProgressPill.formatDuration(fsm.elapsedSec)} / 02:00',
-                                        style: AppTypography.captionBadge(
-                                          color: AppColors.pureWhite,
-                                          weight: FontWeight.w700,
-                                          tabular: true,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Container(
-                                    key: const Key('live_alert_badge'),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: badgeBg,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        fsm.alertTier.badgeLabelId,
-                                        style: AppTypography.captionBadge(
-                                          color: badgeFg,
-                                          weight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (frame?.isLowQualityWindow ?? false)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppColors.amberSoftBg,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  'Kaki kurang terlihat, cek pencahayaan atau jarak kamera.',
-                                  style: AppTypography.captionBadge(
-                                    color: AppColors.amberDarkText,
-                                    weight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
+        body: Stack(
+          children: [
+            const Positioned.fill(child: LiveCameraBackdrop()),
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: SkeletonHudPainter(
+                    frame: frame,
+                    alertTier: fsm.alertTier,
                   ),
                 ),
-
-                // Lower Dark Elevated Clinical HUD Panel
-                Container(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  decoration: const BoxDecoration(
-                    color: AppColors.darkElevated,
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+            ),
+            SafeArea(
+              child: Stack(
+                children: [
+                  // Alert tier badge (top-left)
+                  Positioned(
+                    top: 12,
+                    left: 16,
+                    child: Container(
+                      key: const Key('live_alert_badge'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeBg,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        fsm.alertTier.badgeLabelId,
+                        style: AppTypography.captionBadge(
+                          color: badgeFg,
+                          weight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      ParkinHighlightPrompt(
-                        key: const Key('live_highlight_prompt'),
-                        highlightWord: promptWord,
-                        instructionTail: promptTail,
-                      ),
-                      const SizedBox(height: 16),
-                      ParkinRiskGauge(
-                        key: const Key('live_risk_gauge'),
-                        calibratedRiskScore: frame?.calibratedRiskScore ?? 0.0,
-                        onDarkSurface: true,
-                      ),
-                      const SizedBox(height: 14),
-                      ParkinProgressPill(
+
+                  // Session progress (top-centre)
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 52),
+                      child: _LiveProgressOverlay(
                         key: const Key('live_progress_pill'),
                         elapsedSeconds: fsm.elapsedSec,
                         totalSeconds: ClinicalSessionFsm.sessionDurationSec,
-                        onDarkSurface: true,
                       ),
-                      if (uiState.isPreviewSimulation) ...[
-                        const SizedBox(height: 14),
-                        _PreviewScenarioBar(
-                          scenarios: const <PreviewGaitScenario>[
-                            PreviewGaitScenario.normalGait,
-                            PreviewGaitScenario.confirmedFog,
-                            PreviewGaitScenario.suddenFall,
+                    ),
+                  ),
+
+                  // FoG risk percentage (right edge, transparent background)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: Semantics(
+                        key: const Key('live_risk_gauge'),
+                        label: 'Skor risiko FoG $riskPct persen',
+                        excludeSemantics: true,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '$riskPct%',
+                              style: AppTypography.displayTimer(
+                                color: riskColor,
+                                size: 44,
+                              ).copyWith(shadows: _overlayTextShadow),
+                            ),
+                            Text(
+                              'Risiko FoG',
+                              style: AppTypography.captionBadge(
+                                color: AppColors.pureWhite,
+                                weight: FontWeight.w700,
+                              ).copyWith(shadows: _overlayTextShadow),
+                            ),
                           ],
-                          onSelected: onScenarioSelected,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom: warnings, floating cue, panel toggle + panel
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (frame?.isLowQualityWindow ?? false)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.amberSoftBg.withValues(
+                                  alpha: 0.92,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Kaki kurang terlihat, cek pencahayaan atau jarak kamera.',
+                                style: AppTypography.captionBadge(
+                                  color: AppColors.amberDarkText,
+                                  weight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (showFloatingPrompt)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: prompt,
+                          ),
+                        Center(
+                          child: _PanelToggleButton(
+                            open: _panelOpen,
+                            onPressed: () =>
+                                setState(() => _panelOpen = !_panelOpen),
+                          ),
+                        ),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          alignment: Alignment.topCenter,
+                          child: _panelOpen
+                              ? _buildPanel(prompt)
+                              : const SizedBox(width: double.infinity),
                         ),
                       ],
-                      const SizedBox(height: 18),
-                      ParkinPrimaryPillButton(
-                        key: const Key('live_finish_test_button'),
-                        label: 'Selesaikan Tes',
-                        backgroundColor: AppColors.alertRed,
-                        leadingIcon: ParkinIcons.stopSquare(
-                          color: AppColors.alertRed,
-                        ),
-                        onPressed: onFinishTest,
-                      ),
-                    ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPanel(Widget prompt) {
+    return Container(
+      key: const Key('live_control_panel'),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+      decoration: const BoxDecoration(
+        color: AppColors.darkElevated,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          prompt,
+          if (widget.uiState.isPreviewSimulation) ...[
+            const SizedBox(height: 14),
+            _PreviewScenarioBar(
+              scenarios: const <PreviewGaitScenario>[
+                PreviewGaitScenario.normalGait,
+                PreviewGaitScenario.confirmedFog,
+                PreviewGaitScenario.suddenFall,
+              ],
+              onSelected: widget.onScenarioSelected,
+            ),
+          ],
+          const SizedBox(height: 18),
+          ParkinPrimaryPillButton(
+            key: const Key('live_finish_test_button'),
+            label: 'Selesaikan Tes',
+            backgroundColor: AppColors.alertRed,
+            leadingIcon: ParkinIcons.stopSquare(color: AppColors.alertRed),
+            onPressed: widget.onFinishTest,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact elapsed/total timer with a thin aqua progress track, drawn over
+/// the camera feed.
+class _LiveProgressOverlay extends StatelessWidget {
+  const _LiveProgressOverlay({
+    super.key,
+    required this.elapsedSeconds,
+    required this.totalSeconds,
+  });
+
+  final int elapsedSeconds;
+  final int totalSeconds;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = totalSeconds <= 0 ? 120 : totalSeconds;
+    final progress = (elapsedSeconds / total).clamp(0.0, 1.0);
+    return Container(
+      width: 168,
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+      decoration: BoxDecoration(
+        color: AppColors.midnightNavy.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${ParkinProgressPill.formatDuration(elapsedSeconds)} / '
+            '${ParkinProgressPill.formatDuration(total)}',
+            style: AppTypography.captionBadge(
+              color: AppColors.pureWhite,
+              weight: FontWeight.w700,
+              tabular: true,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 5,
+              color: AppColors.rhythmAqua,
+              backgroundColor: AppColors.pureWhite.withValues(alpha: 0.25),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PanelToggleButton extends StatelessWidget {
+  const _PanelToggleButton({required this.open, required this.onPressed});
+
+  final bool open;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: open ? 'Sembunyikan panel kontrol' : 'Tampilkan panel kontrol',
+      child: Material(
+        key: const Key('live_panel_toggle'),
+        color: AppColors.midnightNavy.withValues(alpha: 0.6),
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                open
+                    ? ParkinIcons.chevronDown(size: 20)
+                    : ParkinIcons.chevronUp(size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  open ? 'Tutup' : 'Kontrol',
+                  style: AppTypography.captionBadge(
+                    color: AppColors.pureWhite,
+                    weight: FontWeight.w700,
                   ),
                 ),
               ],

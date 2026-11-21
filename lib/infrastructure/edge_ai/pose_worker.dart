@@ -29,8 +29,9 @@ class PoseWorkerResult {
 /// `yolo26n-pose.onnx` -> main-person decode for each frame, so the UI isolate
 /// never touches per-pixel work or the 56x8400 output tensor.
 ///
-/// The ORT session is created on the root isolate and shared by address;
-/// only one frame is processed at a time.
+/// The ORT session (NNAPI fp16, CPU fallback) is created and owned by the
+/// worker, so the multi-second NNAPI compilation never blocks the UI isolate.
+/// Only one frame is processed at a time.
 class PoseWorker {
   PoseWorker._(this._isolate, this._requests, this._responses);
 
@@ -40,29 +41,42 @@ class PoseWorker {
   Completer<PoseWorkerResult>? _pending;
   bool _closed = false;
 
-  static Future<PoseWorker> spawn(int sessionAddress) async {
+  /// Spawns the worker and builds the pose session from [model] inside it.
+  /// Completes once the session is ready to run frames.
+  static Future<PoseWorker> spawn(
+    TransferableTypedData model, {
+    required int cpuThreads,
+    bool useNnapi = true,
+  }) async {
     final responses = ReceivePort();
     final handshake = Completer<SendPort>();
     PoseWorker? worker;
     responses.listen((message) {
-      if (!handshake.isCompleted && message is SendPort) {
-        handshake.complete(message);
+      if (!handshake.isCompleted) {
+        if (message is SendPort) {
+          handshake.complete(message);
+        } else {
+          handshake.completeError(StateError('Pose worker: $message'));
+        }
         return;
       }
       worker?._onMessage(message);
     });
     final isolate = await Isolate.spawn(_workerMain, (
       responses.sendPort,
-      sessionAddress,
+      model,
+      cpuThreads,
+      useNnapi,
     ), debugName: 'parkin-pose-worker');
-    final requests = await handshake.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        isolate.kill(priority: Isolate.immediate);
-        responses.close();
-        throw StateError('Pose worker failed to start.');
-      },
-    );
+    final SendPort requests;
+    try {
+      // NNAPI compiles the graph on first load (~6 s on mid-range phones).
+      requests = await handshake.future.timeout(const Duration(seconds: 60));
+    } on Object {
+      isolate.kill(priority: Isolate.immediate);
+      responses.close();
+      rethrow;
+    }
     return worker = PoseWorker._(isolate, requests, responses);
   }
 
@@ -89,8 +103,7 @@ class PoseWorker {
     return completer.future;
   }
 
-  /// Stops the isolate after its current frame. The ORT session must only be
-  /// released after this returns.
+  /// Stops the isolate after its current frame and releases its session.
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -108,17 +121,27 @@ class PoseWorker {
     pending?.completeError(StateError('Pose worker closed.'));
   }
 
-  static void _workerMain((SendPort, int) args) {
-    final (replies, sessionAddress) = args;
+  static void _workerMain((SendPort, TransferableTypedData, int, bool) args) {
+    final (replies, model, cpuThreads, useNnapi) = args;
+    final OrtSession session;
+    try {
+      session = _createSession(
+        model.materialize().asUint8List(),
+        cpuThreads,
+        useNnapi: useNnapi,
+      );
+    } on Object catch (error) {
+      replies.send('session load failed: $error');
+      return;
+    }
+    final runOptions = OrtRunOptions();
     final requests = ReceivePort();
     replies.send(requests.sendPort);
-
-    final session = OrtSession.fromAddress(sessionAddress);
-    final runOptions = OrtRunOptions();
 
     requests.listen((message) {
       if (message is! YuvFrame) {
         runOptions.release();
+        session.release();
         requests.close();
         return;
       }
@@ -128,6 +151,33 @@ class PoseWorker {
         replies.send(error.toString());
       }
     });
+  }
+
+  static OrtSession _createSession(
+    Uint8List model,
+    int cpuThreads, {
+    required bool useNnapi,
+  }) {
+    // ORT keeps one ref-counted environment per process; this only binds it
+    // to this isolate's Dart wrapper.
+    OrtEnv.instance.init();
+    final options = OrtSessionOptions()
+      ..setIntraOpNumThreads(cpuThreads)
+      ..setSessionGraphOptimizationLevel(GraphOptimizationLevel.ortEnableAll);
+    if (useNnapi) {
+      try {
+        // NNAPI fp16 offloads ~97% of nodes to the phone's NPU/GPU
+        // (138 ms vs 243 ms CPU on SM-A346E); the rest falls back to CPU.
+        options.appendNnapiProvider(NnapiFlags.useFp16);
+      } on Object {
+        // NNAPI unavailable: the session runs on the CPU provider only.
+      }
+    }
+    try {
+      return OrtSession.fromBuffer(model, options);
+    } finally {
+      options.release();
+    }
   }
 
   static PoseWorkerResult _processFrame(

@@ -16,6 +16,9 @@ class PreviewPoseInferenceAdapter implements EdgeInferencePort {
   PreviewGaitScenario _scenario = PreviewGaitScenario.normalGait;
 
   @override
+  Future<void> warmUp() async {}
+
+  @override
   bool get isPreviewSimulation => true;
 
   @override

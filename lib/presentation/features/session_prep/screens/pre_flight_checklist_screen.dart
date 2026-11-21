@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../di/clinical_session_providers.dart';
 import '../../../../di/dashboard_providers.dart';
 import '../../../../di/onboarding_providers.dart';
 import '../../../../di/session_prep_providers.dart';
@@ -30,6 +33,11 @@ class _PreFlightChecklistScreenState
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      // Load the pose/FoG models while the patient works through the
+      // checklist, so "Lanjut ke Kamera" opens the camera without a stall.
+      unawaited(
+        ref.read(edgeInferencePortProvider).warmUp().catchError((Object _) {}),
+      );
       final latestLog =
           ref.read(homeDashboardControllerProvider).summary.latestMedicationLog;
       if (latestLog != null) {

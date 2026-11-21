@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -14,11 +15,12 @@ import '../../domain/enums/preview_gait_scenario.dart';
 import '../../domain/value_objects/keypoint_2d.dart';
 import 'fog_feature_extractor.dart';
 import 'onnx_fog_classifier.dart';
+import 'ort_benchmark.dart';
 import 'pose_worker.dart';
 import 'yolo_pose_codec.dart';
 
 /// On-device 15 Hz pipeline: back camera YUV stream -> [PoseWorker] isolate
-/// (upright RGBA + letterbox + `yolo26n-pose.onnx` on XNNPACK) -> main-person
+/// (letterbox + `yolo26n-pose.onnx` on NNAPI fp16) -> main-person
 /// 17-COCO keypoints -> Scenario B DSP
 /// + 126 FFT/kinematic features every 1 s -> `lgbm_b15hz.onnx` p(FoG).
 ///
@@ -32,7 +34,16 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   final String modelAssetPath;
 
   static const Duration _minFrameInterval = Duration(milliseconds: 66);
-  static const int _inferenceThreads = 4;
+  static const int _cameraFps = 15;
+  /// CPU fallback threads: SM-A346E-class SoCs have 2 big cores; more
+  /// threads land on little cores and run slower (benchmarked 2 > 4 > 1).
+  static const int _inferenceThreads = 2;
+
+  /// `--dart-define=PARKIN_POSE_EP=cpu` forces the CPU provider (A/B tests).
+  static const String _poseExecutionProvider = String.fromEnvironment(
+    'PARKIN_POSE_EP',
+    defaultValue: 'nnapi',
+  );
 
   /// Features assume 15 Hz sampling; below this the window spans too long.
   static const double _minReliableFps = 12.0;
@@ -40,8 +51,8 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
 
   final ValueNotifier<CameraController?> _camera =
       ValueNotifier<CameraController?>(null);
-  OrtSession? _session;
   PoseWorker? _worker;
+  Future<void>? _sessionLoad;
   final FogFeatureExtractor _fog = FogFeatureExtractor();
   final OnnxFogClassifier _classifier = OnnxFogClassifier();
 
@@ -56,6 +67,8 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   bool _busy = false;
   int _seq = 0;
   int _lastProcessedMs = 0;
+  int _camFrames = 0;
+  int _camWindowStartMs = 0;
   double _fpsEma = 0;
 
   /// Initialized back camera while a live stream runs, `null` otherwise.
@@ -98,17 +111,24 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
 
   Future<void> dispose() async {
     await _stopCameraAndClose();
+    await _sessionLoad?.catchError((Object _) {});
+    _sessionLoad = null;
     await _worker?.close();
     _worker = null;
-    _session?.release();
-    _session = null;
     _classifier.release();
     _camera.dispose();
   }
 
+  /// Starts loading both models in the background (worker isolate) so the
+  /// live screen opens without waiting for the NNAPI compilation.
+  @override
+  Future<void> warmUp() => _ensureSession();
+
   Future<void> _start(StreamController<LiveFrameResult> controller) async {
+    // Camera and models start together: the preview shows as soon as the
+    // camera is up, and frames are skipped until the pose worker is ready.
+    final modelsReady = _ensureSession();
     try {
-      await _ensureSession();
       final camera = await _openBackCamera();
       if (controller.isClosed) {
         await camera.dispose();
@@ -118,30 +138,38 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
       await camera.startImageStream(
         (image) => _onImage(image, camera.description, controller),
       );
+      await modelsReady;
     } on Object catch (error, stack) {
       if (!controller.isClosed) controller.addError(error, stack);
     }
   }
 
-  Future<void> _ensureSession() async {
-    if (_session != null) return;
+  /// Loads the models once; concurrent session starts share the same load.
+  Future<void> _ensureSession() {
+    final pending = _sessionLoad ??= _loadSession();
+    return pending.catchError((Object error) {
+      _sessionLoad = null; // allow a retry on the next session
+      throw error;
+    });
+  }
+
+  Future<void> _loadSession() async {
+    final watch = Stopwatch()..start();
     OrtEnv.instance.init();
     await _classifier.load();
     final raw = await rootBundle.load(modelAssetPath);
-    final options = OrtSessionOptions()
-      ..setIntraOpNumThreads(_inferenceThreads)
-      ..setSessionGraphOptimizationLevel(GraphOptimizationLevel.ortEnableAll);
-    try {
-      // XNNPACK runs the conv-heavy pose model on optimized ARM NEON kernels;
-      // unsupported nodes fall back to the default CPU provider.
-      options.appendXnnpackProvider();
-    } on Object catch (error) {
-      if (kDebugMode) debugPrint('XNNPACK unavailable, using CPU: $error');
+    if (OrtBenchmark.enabled) await OrtBenchmark.run(raw.buffer.asUint8List());
+    _worker = await PoseWorker.spawn(
+      TransferableTypedData.fromList(<TypedData>[raw.buffer.asUint8List()]),
+      cpuThreads: _inferenceThreads,
+      useNnapi: _poseExecutionProvider != 'cpu',
+    );
+    if (!kReleaseMode) {
+      debugPrint(
+        'Pose models ready in ${watch.elapsedMilliseconds}ms '
+        '(ep=$_poseExecutionProvider)',
+      );
     }
-    final session = OrtSession.fromBuffer(raw.buffer.asUint8List(), options);
-    options.release();
-    _session = session;
-    _worker = await PoseWorker.spawn(session.address);
   }
 
   Future<CameraController> _openBackCamera() async {
@@ -157,6 +185,9 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
       description,
       ResolutionPreset.medium,
       enableAudio: false,
+      // The FoG features are trained at 15 Hz; a 30 FPS stream only doubles
+      // the per-frame copies into Dart without adding usable samples.
+      fps: _cameraFps,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
     await camera.initialize();
@@ -169,7 +200,8 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     StreamController<LiveFrameResult> controller,
   ) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (_busy || controller.isClosed) return;
+    _camFrames++;
+    if (_busy || controller.isClosed || _worker == null) return;
     if (now - _lastProcessedMs < _minFrameInterval.inMilliseconds) return;
     if (image.planes.length < 3) return;
 
@@ -193,10 +225,19 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
       final keypoints = result.keypoints ?? _emptyKeypoints;
       _updateFogWindow(keypoints);
       controller.add(_buildResult(keypoints, meta, startedMs));
-      if (!kReleaseMode && _seq % 30 == 1) {
+      if (!kReleaseMode && _seq % 15 == 1) {
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        final e2e = nowMs - startedMs;
+        final overhead = e2e - result.preprocessMs - result.inferenceMs;
+        final camFps = _camWindowStartMs == 0
+            ? 0.0
+            : _camFrames * 1000 / (nowMs - _camWindowStartMs);
+        _camFrames = 0;
+        _camWindowStartMs = nowMs;
         debugPrint(
           'Pose perf: pre=${result.preprocessMs}ms '
-          'yolo=${result.inferenceMs}ms fps=${_fpsEma.toStringAsFixed(1)}',
+          'yolo=${result.inferenceMs}ms overhead=${overhead}ms e2e=${e2e}ms '
+          'fps=${_fpsEma.toStringAsFixed(1)} camFps=${camFps.toStringAsFixed(1)}',
         );
       }
     } on Object catch (error, stack) {
@@ -251,7 +292,9 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   ) {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_lastProcessedMs > 0) {
-      final instantFps = 1000 / (now - _lastProcessedMs).clamp(1, 10000);
+      // Start-to-start interval of processed frames = effective sample period.
+      final instantFps =
+          1000 / (startedMs - _lastProcessedMs).clamp(1, 10000);
       _fpsEma = _fpsEma == 0 ? instantFps : _fpsEma * 0.8 + instantFps * 0.2;
     }
     _lastProcessedMs = startedMs;
