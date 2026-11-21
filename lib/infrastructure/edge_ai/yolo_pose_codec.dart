@@ -122,22 +122,33 @@ abstract final class YoloPoseCodec {
     return YoloInput(tensor: tensor, meta: meta);
   }
 
-  /// Picks the highest-confidence person (>= [detConf]) from the flattened
-  /// [1,56,8400] output and maps its 17 keypoints into upright image pixels.
+  /// Picks the main person (`conf >= [detConf]`, best area * conf * center
+  /// penalty) from the flattened [1,56,8400] output and maps its 17 keypoints
+  /// into upright image pixels.
   /// Returns `null` when no person passes the detection threshold.
-  static List<Keypoint2D>? decodeBestPerson(
+  static List<Keypoint2D>? decodeMainPerson(
     Float32List output,
     LetterboxMeta meta,
   ) {
     if (output.length != channels * anchors) return null;
 
+    // Main-person selection identical to `_select_main_person`:
+    // score = area * conf * (1 - 0.3 * |cx - W/2| / max(W/2, 1)) in image pixels.
     const confOffset = 4 * anchors;
+    final halfW = meta.imageWidth * 0.5;
+    final penaltyDenom = halfW > 1.0 ? halfW : 1.0;
     var best = -1;
-    var bestConf = detConf;
+    var bestScore = double.negativeInfinity;
     for (var j = 0; j < anchors; j++) {
       final conf = output[confOffset + j];
-      if (conf >= bestConf) {
-        bestConf = conf;
+      if (conf < detConf) continue;
+      final w = output[2 * anchors + j] / meta.scale;
+      final h = output[3 * anchors + j] / meta.scale;
+      final cx = (output[j] - meta.padLeft) / meta.scale;
+      final penalty = 1.0 - 0.3 * (cx - halfW).abs() / penaltyDenom;
+      final score = w * h * conf * penalty;
+      if (score > bestScore) {
+        bestScore = score;
         best = j;
       }
     }

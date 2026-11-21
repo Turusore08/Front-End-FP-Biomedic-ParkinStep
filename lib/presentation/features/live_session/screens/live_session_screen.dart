@@ -24,6 +24,7 @@ import '../../../widgets/design_system/parkin_risk_gauge.dart';
 import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
 import '../../../widgets/design_system/parkin_state_cards.dart';
 import '../painters/skeleton_hud_painter.dart';
+import '../widgets/live_camera_backdrop.dart';
 
 /// Unified live screening flow hosting S-05 (Framing & Calibration),
 /// S-06 (60 FPS Live Skeleton HUD + Two-Tier Cueing), S-08 (10s Fall Guard),
@@ -181,6 +182,7 @@ class _FramingAndCalibrationView extends StatelessWidget {
         body: SafeArea(
           child: Stack(
             children: [
+              const Positioned.fill(child: LiveCameraBackdrop()),
               // 60 FPS Live Skeleton Overlay + Alignment Reticle
               Positioned.fill(
                 child: RepaintBoundary(
@@ -436,6 +438,7 @@ class _LiveRecordingHudView extends StatelessWidget {
                   height: viewportHeight,
                   child: Stack(
                     children: [
+                      const Positioned.fill(child: LiveCameraBackdrop()),
                       Positioned.fill(
                         child: RepaintBoundary(
                           child: CustomPaint(

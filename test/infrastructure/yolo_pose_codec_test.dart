@@ -20,7 +20,7 @@ void main() {
     });
   });
 
-  group('YoloPoseCodec.decodeBestPerson', () {
+  group('YoloPoseCodec.decodeMainPerson', () {
     const a = YoloPoseCodec.anchors;
 
     Float32List outputWith({
@@ -28,8 +28,15 @@ void main() {
       required double conf,
       required double kx,
       required double ky,
+      Float32List? into,
+      double cx = 320,
+      double w = 100,
+      double h = 200,
     }) {
-      final out = Float32List(YoloPoseCodec.channels * a);
+      final out = into ?? Float32List(YoloPoseCodec.channels * a);
+      out[anchor] = cx;
+      out[2 * a + anchor] = w;
+      out[3 * a + anchor] = h;
       out[4 * a + anchor] = conf;
       for (var k = 0; k < 17; k++) {
         final base = (5 + k * 3) * a + anchor;
@@ -43,24 +50,49 @@ void main() {
     test('returns null below DET_CONF 0.25', () {
       final out = outputWith(anchor: 10, conf: 0.2, kx: 1, ky: 1);
       final meta = YoloPoseCodec.letterboxFor(1280, 720);
-      expect(YoloPoseCodec.decodeBestPerson(out, meta), isNull);
+      expect(YoloPoseCodec.decodeMainPerson(out, meta), isNull);
     });
 
-    test('picks highest confidence anchor and undoes letterbox', () {
+    test('undoes letterbox for the selected person', () {
       final out = outputWith(anchor: 42, conf: 0.87, kx: 381.17, ky: 321.82);
-      out[4 * a + 7] = 0.5; // weaker second person
       final meta = YoloPoseCodec.letterboxFor(1280, 720);
 
-      final kps = YoloPoseCodec.decodeBestPerson(out, meta)!;
+      final kps = YoloPoseCodec.decodeMainPerson(out, meta)!;
       expect(kps, hasLength(17));
       expect(kps[11].x, closeTo(762.34, 1e-3));
       expect(kps[11].y, closeTo((321.82 - 140) * 2, 1e-3));
       expect(kps[11].conf, closeTo(0.9, 1e-6));
     });
 
+    test('main-person score prefers large centered patient over '
+        'higher-confidence small off-center bystander', () {
+      final meta = YoloPoseCodec.letterboxFor(640, 640);
+      final out = outputWith(
+        anchor: 7,
+        conf: 0.95,
+        kx: 600,
+        ky: 100,
+        cx: 600,
+        w: 60,
+        h: 120,
+      );
+      outputWith(
+        into: out,
+        anchor: 42,
+        conf: 0.6,
+        kx: 320,
+        ky: 300,
+        cx: 320,
+        w: 150,
+        h: 400,
+      );
+      final kps = YoloPoseCodec.decodeMainPerson(out, meta)!;
+      expect(kps[11].x, closeTo(320, 1e-3));
+    });
+
     test('rejects malformed output length', () {
       final meta = YoloPoseCodec.letterboxFor(640, 640);
-      expect(YoloPoseCodec.decodeBestPerson(Float32List(10), meta), isNull);
+      expect(YoloPoseCodec.decodeMainPerson(Float32List(10), meta), isNull);
     });
   });
 

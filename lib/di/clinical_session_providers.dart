@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/controllers/clinical_session_coordinator.dart';
@@ -31,6 +33,14 @@ final onnxPoseAdapterProvider = Provider<OnnxPoseInferenceAdapter>((ref) {
   ref.onDispose(() => unawaited(adapter.dispose()));
   return adapter;
 });
+
+/// Live back-camera controller for `CameraPreview`; `null` in synthetic preview mode.
+final liveCameraControllerProvider =
+    Provider<ValueListenable<CameraController?>?>(
+      (ref) => _edgeMode == 'onnx'
+          ? ref.watch(onnxPoseAdapterProvider).cameraController
+          : null,
+    );
 
 final edgeInferencePortProvider = Provider<EdgeInferencePort>(
   (ref) => _edgeMode == 'onnx'

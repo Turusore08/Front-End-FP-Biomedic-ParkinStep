@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 
@@ -11,14 +12,16 @@ import '../../domain/entities/live_frame_result.dart';
 import '../../domain/enums/medication_state.dart';
 import '../../domain/enums/preview_gait_scenario.dart';
 import '../../domain/value_objects/keypoint_2d.dart';
+import 'fog_feature_extractor.dart';
+import 'onnx_fog_classifier.dart';
 import 'yolo_pose_codec.dart';
 
-/// On-device 15 Hz pose inference: back camera YUV stream -> letterbox (isolate)
-/// -> `yolo26n-pose.onnx` via ONNX Runtime -> best person 17-COCO keypoints.
+/// On-device 15 Hz pipeline: back camera YUV stream -> letterbox (isolate)
+/// -> `yolo26n-pose.onnx` -> main-person 17-COCO keypoints -> Scenario B DSP
+/// + 126 FFT/kinematic features every 1 s -> `lgbm_b15hz.onnx` p(FoG).
 ///
-/// Only the pose stage is real. The FoG classifier (LightGBM / ST-GCN) is not
-/// exported yet, so [LiveFrameResult.rawProb] and [LiveFrameResult.freezeIndex]
-/// stay at 0 until a classifier adapter is wired in.
+/// Each emitted frame carries the most recent window's [LiveFrameResult.rawProb],
+/// [LiveFrameResult.freezeIndex] and quality flag; they refresh once per stride.
 class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   OnnxPoseInferenceAdapter({
     this.modelAssetPath = 'assets/models/yolo26n-pose.onnx',
@@ -27,18 +30,33 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   final String modelAssetPath;
 
   static const Duration _minFrameInterval = Duration(milliseconds: 66);
+
+  /// Features assume 15 Hz sampling; below this the window spans too long.
+  static const double _minReliableFps = 12.0;
   static const List<int> _lb6Indices = <int>[11, 12, 13, 14, 15, 16];
 
-  CameraController? _camera;
+  final ValueNotifier<CameraController?> _camera =
+      ValueNotifier<CameraController?>(null);
   OrtSession? _session;
+  final FogFeatureExtractor _fog = FogFeatureExtractor();
+  final OnnxFogClassifier _classifier = OnnxFogClassifier();
+
+  /// Bumped on every new session so late isolate results from a previous
+  /// session are dropped.
+  int _generation = 0;
+  bool _dspBusy = false;
+  double _latestProb = 0.0;
+  double _latestFreezeIndex = 0.0;
+  bool _latestWindowLowQuality = true;
   StreamController<LiveFrameResult>? _controller;
   bool _busy = false;
   int _seq = 0;
   int _lastProcessedMs = 0;
   double _fpsEma = 0;
 
-  /// Exposes the running camera so the UI can render a `CameraPreview`.
-  CameraController? get cameraController => _camera;
+  /// Initialized back camera while a live stream runs, `null` otherwise.
+  /// The UI listens to this to render a `CameraPreview` under the skeleton HUD.
+  ValueListenable<CameraController?> get cameraController => _camera;
 
   @override
   bool get isPreviewSimulation => false;
@@ -49,6 +67,12 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     _seq = 0;
     _fpsEma = 0;
     _lastProcessedMs = 0;
+    _fog.reset();
+    _generation++;
+    _dspBusy = false;
+    _latestProb = 0.0;
+    _latestFreezeIndex = 0.0;
+    _latestWindowLowQuality = true;
     final controller = StreamController<LiveFrameResult>.broadcast();
     _controller = controller;
     unawaited(_start(controller));
@@ -72,6 +96,8 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     await _stopCameraAndClose();
     _session?.release();
     _session = null;
+    _classifier.release();
+    _camera.dispose();
   }
 
   Future<void> _start(StreamController<LiveFrameResult> controller) async {
@@ -82,7 +108,7 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
         await camera.dispose();
         return;
       }
-      _camera = camera;
+      _camera.value = camera;
       await camera.startImageStream(
         (image) => _onImage(image, camera.description, controller),
       );
@@ -94,6 +120,7 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   Future<void> _ensureSession() async {
     if (_session != null) return;
     OrtEnv.instance.init();
+    await _classifier.load();
     final raw = await rootBundle.load(modelAssetPath);
     final options = OrtSessionOptions()
       ..setIntraOpNumThreads(2)
@@ -144,12 +171,13 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     final session = _session;
     if (session == null) return;
     try {
-      final input = await Isolate.run(() => YoloPoseCodec.preprocess(frame));
+      final input = await _preprocessInIsolate(frame);
       final output = await _runModel(session, input.tensor);
       if (output == null || controller.isClosed) return;
 
       final keypoints =
-          YoloPoseCodec.decodeBestPerson(output, input.meta) ?? _emptyKeypoints;
+          YoloPoseCodec.decodeMainPerson(output, input.meta) ?? _emptyKeypoints;
+      _updateFogWindow(keypoints);
       controller.add(_buildResult(keypoints, input.meta, startedMs));
     } on Object catch (error, stack) {
       if (kDebugMode) debugPrint('ONNX pose inference failed: $error');
@@ -199,6 +227,48 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     return offset == out.length ? out : null;
   }
 
+  /// Buffers the frame; when a window is due, runs the DSP + features in a
+  /// background isolate, then LightGBM (sub-millisecond) on this isolate.
+  void _updateFogWindow(List<Keypoint2D> keypoints) {
+    final snapshot = _fog.pushSnapshot(keypoints);
+    if (snapshot == null) return;
+    if (_dspBusy) {
+      // Previous window still computing (> 1 s): skip rather than queue up.
+      if (kDebugMode) debugPrint('FoG DSP still busy; window skipped.');
+      return;
+    }
+    _dspBusy = true;
+    final generation = _generation;
+    unawaited(
+      _computeFogWindowInIsolate(snapshot)
+          .then((window) => _applyFogWindow(window, generation))
+          .catchError((Object error) {
+            if (kDebugMode) debugPrint('FoG DSP failed: $error');
+          })
+          .whenComplete(() {
+            if (generation == _generation) _dspBusy = false;
+          }),
+    );
+  }
+
+  void _applyFogWindow(FogWindowFeatures window, int generation) {
+    if (generation != _generation) return;
+    final p = _classifier.predict(window.features);
+    if (p == null) return;
+    _latestProb = p;
+    _latestFreezeIndex = window.freezeIndexAnkle;
+    _latestWindowLowQuality =
+        window.isLowQuality || (_fpsEma > 0 && _fpsEma < _minReliableFps);
+  }
+
+  // Static so the isolate closures capture only their argument, never `this`.
+  static Future<YoloInput> _preprocessInIsolate(YuvFrame frame) =>
+      Isolate.run(() => YoloPoseCodec.preprocess(frame));
+
+  static Future<FogWindowFeatures> _computeFogWindowInIsolate(
+    FogWindowSnapshot snapshot,
+  ) => Isolate.run(() => FogFeatureExtractor.computeWindow(snapshot));
+
   LiveFrameResult _buildResult(
     List<Keypoint2D> keypoints,
     LetterboxMeta meta,
@@ -226,8 +296,11 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
       keypoints17: keypoints,
       lb6AvgConf: lb6AvgConf,
       effectiveFps: _fpsEma,
-      rawProb: 0.0,
-      isLowQualityWindow: lb6AvgConf < Keypoint2D.confValidThreshold,
+      rawProb: _latestProb,
+      thresholdUsed: OnnxFogClassifier.threshold,
+      freezeIndex: _latestFreezeIndex,
+      isLowQualityWindow:
+          _latestWindowLowQuality || lb6AvgConf < Keypoint2D.confValidThreshold,
     );
   }
 
@@ -249,14 +322,16 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   }
 
   Future<void> _stopCameraAndClose() async {
-    final camera = _camera;
-    _camera = null;
+    final camera = _camera.value;
+    _camera.value = null;
     final controller = _controller;
     _controller = null;
     if (controller != null && !controller.isClosed) {
       await controller.close();
     }
     if (camera == null) return;
+    // Let the UI drop its CameraPreview before the controller is disposed.
+    await SchedulerBinding.instance.endOfFrame;
     if (camera.value.isStreamingImages) {
       await camera.stopImageStream();
     }
