@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -14,14 +15,20 @@ import '../../domain/enums/preview_gait_scenario.dart';
 import '../../domain/value_objects/keypoint_2d.dart';
 import 'fog_feature_extractor.dart';
 import 'onnx_fog_classifier.dart';
+import 'pose_worker.dart';
 import 'yolo_pose_codec.dart';
 
-/// On-device 15 Hz pipeline: back camera YUV stream -> letterbox (isolate)
-/// -> `yolo26n-pose.onnx` -> main-person 17-COCO keypoints -> Scenario B DSP
+/// On-device 15 Hz pipeline: back camera YUV stream -> [PoseWorker] isolate
+/// (upright RGBA + letterbox + `yolo26n-pose.onnx` on XNNPACK) -> main-person
+/// 17-COCO keypoints -> Scenario B DSP
 /// + 126 FFT/kinematic features every 1 s -> `lgbm_b15hz.onnx` p(FoG).
 ///
 /// Each emitted frame carries the most recent window's [LiveFrameResult.rawProb],
 /// [LiveFrameResult.freezeIndex] and quality flag; they refresh once per stride.
+///
+/// The UI shows [analyzedFrame] instead of a live `CameraPreview`: it is the
+/// exact frame the keypoints were detected on, so the skeleton never lags the
+/// picture underneath it.
 class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   OnnxPoseInferenceAdapter({
     this.modelAssetPath = 'assets/models/yolo26n-pose.onnx',
@@ -30,14 +37,16 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   final String modelAssetPath;
 
   static const Duration _minFrameInterval = Duration(milliseconds: 66);
+  static const int _inferenceThreads = 4;
 
   /// Features assume 15 Hz sampling; below this the window spans too long.
   static const double _minReliableFps = 12.0;
   static const List<int> _lb6Indices = <int>[11, 12, 13, 14, 15, 16];
 
-  final ValueNotifier<CameraController?> _camera =
-      ValueNotifier<CameraController?>(null);
+  CameraController? _camera;
+  final ValueNotifier<ui.Image?> _frameImage = ValueNotifier<ui.Image?>(null);
   OrtSession? _session;
+  PoseWorker? _worker;
   final FogFeatureExtractor _fog = FogFeatureExtractor();
   final OnnxFogClassifier _classifier = OnnxFogClassifier();
 
@@ -54,9 +63,9 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   int _lastProcessedMs = 0;
   double _fpsEma = 0;
 
-  /// Initialized back camera while a live stream runs, `null` otherwise.
-  /// The UI listens to this to render a `CameraPreview` under the skeleton HUD.
-  ValueListenable<CameraController?> get cameraController => _camera;
+  /// Upright image of the most recently analysed frame, published together
+  /// with its [LiveFrameResult]; `null` when no live stream runs.
+  ValueListenable<ui.Image?> get analyzedFrame => _frameImage;
 
   @override
   bool get isPreviewSimulation => false;
@@ -94,10 +103,12 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
 
   Future<void> dispose() async {
     await _stopCameraAndClose();
+    await _worker?.close();
+    _worker = null;
     _session?.release();
     _session = null;
     _classifier.release();
-    _camera.dispose();
+    _frameImage.dispose();
   }
 
   Future<void> _start(StreamController<LiveFrameResult> controller) async {
@@ -108,7 +119,7 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
         await camera.dispose();
         return;
       }
-      _camera.value = camera;
+      _camera = camera;
       await camera.startImageStream(
         (image) => _onImage(image, camera.description, controller),
       );
@@ -123,10 +134,19 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     await _classifier.load();
     final raw = await rootBundle.load(modelAssetPath);
     final options = OrtSessionOptions()
-      ..setIntraOpNumThreads(2)
+      ..setIntraOpNumThreads(_inferenceThreads)
       ..setSessionGraphOptimizationLevel(GraphOptimizationLevel.ortEnableAll);
-    _session = OrtSession.fromBuffer(raw.buffer.asUint8List(), options);
+    try {
+      // XNNPACK runs the conv-heavy pose model on optimized ARM NEON kernels;
+      // unsupported nodes fall back to the default CPU provider.
+      options.appendXnnpackProvider();
+    } on Object catch (error) {
+      if (kDebugMode) debugPrint('XNNPACK unavailable, using CPU: $error');
+    }
+    final session = OrtSession.fromBuffer(raw.buffer.asUint8List(), options);
     options.release();
+    _session = session;
+    _worker = await PoseWorker.spawn(session.address);
   }
 
   Future<CameraController> _openBackCamera() async {
@@ -168,63 +188,59 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
     int startedMs,
     StreamController<LiveFrameResult> controller,
   ) async {
-    final session = _session;
-    if (session == null) return;
+    final worker = _worker;
+    if (worker == null) return;
     try {
-      final input = await _preprocessInIsolate(frame);
-      final output = await _runModel(session, input.tensor);
-      if (output == null || controller.isClosed) return;
+      final result = await worker.process(frame);
+      final meta = result.meta;
+      final image = await _decodeRgba(
+        result.rgba.materialize().asUint8List(),
+        meta.imageWidth,
+        meta.imageHeight,
+      );
+      if (controller.isClosed) {
+        image.dispose();
+        return;
+      }
 
-      final keypoints =
-          YoloPoseCodec.decodeMainPerson(output, input.meta) ?? _emptyKeypoints;
+      final keypoints = result.keypoints ?? _emptyKeypoints;
       _updateFogWindow(keypoints);
-      controller.add(_buildResult(keypoints, input.meta, startedMs));
+      // Publish picture and skeleton in the same event so they paint together.
+      _publishFrameImage(image);
+      controller.add(_buildResult(keypoints, meta, startedMs));
+      if (!kReleaseMode && _seq % 30 == 1) {
+        debugPrint(
+          'Pose perf: pre=${result.preprocessMs}ms '
+          'yolo=${result.inferenceMs}ms fps=${_fpsEma.toStringAsFixed(1)}',
+        );
+      }
     } on Object catch (error, stack) {
       if (kDebugMode) debugPrint('ONNX pose inference failed: $error');
       if (!controller.isClosed) controller.addError(error, stack);
     }
   }
 
-  Future<Float32List?> _runModel(OrtSession session, Float32List tensor) async {
-    final inputValue = OrtValueTensor.createTensorWithDataList(tensor, <int>[
-      1,
-      3,
-      YoloPoseCodec.inputSize,
-      YoloPoseCodec.inputSize,
-    ]);
-    final runOptions = OrtRunOptions();
-    try {
-      final outputs = await session.runAsync(runOptions, <String, OrtValue>{
-        'images': inputValue,
-      });
-      if (outputs == null || outputs.isEmpty) return null;
-      final first = outputs.first;
-      final flat = first == null ? null : _flatten(first.value);
-      for (final o in outputs) {
-        o?.release();
-      }
-      return flat;
-    } finally {
-      inputValue.release();
-      runOptions.release();
-    }
+  static Future<ui.Image> _decodeRgba(Uint8List rgba, int width, int height) {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      rgba,
+      width,
+      height,
+      ui.PixelFormat.rgba8888,
+      completer.complete,
+    );
+    return completer.future;
   }
 
-  /// Flattens the nested [1][56][8400] list returned by ONNX Runtime.
-  static Float32List? _flatten(Object? value) {
-    if (value is! List || value.isEmpty) return null;
-    final batch = value.first;
-    if (batch is! List) return null;
-    final out = Float32List(YoloPoseCodec.channels * YoloPoseCodec.anchors);
-    var offset = 0;
-    for (final row in batch) {
-      if (row is! List) return null;
-      for (final v in row) {
-        if (offset >= out.length || v is! num) return null;
-        out[offset++] = v.toDouble();
-      }
-    }
-    return offset == out.length ? out : null;
+  /// Swaps the displayed frame; the previous image is disposed only after the
+  /// next frame has been drawn, since `RawImage` clones it during that frame.
+  void _publishFrameImage(ui.Image? image) {
+    final previous = _frameImage.value;
+    _frameImage.value = image;
+    if (previous == null) return;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) => previous.dispose())
+      ..scheduleFrame();
   }
 
   /// Buffers the frame; when a window is due, runs the DSP + features in a
@@ -261,10 +277,7 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
         window.isLowQuality || (_fpsEma > 0 && _fpsEma < _minReliableFps);
   }
 
-  // Static so the isolate closures capture only their argument, never `this`.
-  static Future<YoloInput> _preprocessInIsolate(YuvFrame frame) =>
-      Isolate.run(() => YoloPoseCodec.preprocess(frame));
-
+  // Static so the isolate closure captures only its argument, never `this`.
   static Future<FogWindowFeatures> _computeFogWindowInIsolate(
     FogWindowSnapshot snapshot,
   ) => Isolate.run(() => FogFeatureExtractor.computeWindow(snapshot));
@@ -322,16 +335,15 @@ class OnnxPoseInferenceAdapter implements EdgeInferencePort {
   }
 
   Future<void> _stopCameraAndClose() async {
-    final camera = _camera.value;
-    _camera.value = null;
+    final camera = _camera;
+    _camera = null;
+    _publishFrameImage(null);
     final controller = _controller;
     _controller = null;
     if (controller != null && !controller.isClosed) {
       await controller.close();
     }
     if (camera == null) return;
-    // Let the UI drop its CameraPreview before the controller is disposed.
-    await SchedulerBinding.instance.endOfFrame;
     if (camera.value.isStreamingImages) {
       await camera.stopImageStream();
     }

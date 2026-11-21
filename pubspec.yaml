@@ -45,6 +45,7 @@ dependencies:
   csv: ^8.0.0
   camera: ^0.12.2
   onnxruntime: ^1.4.1
+  ffi: ^2.1.0
 
 dev_dependencies:
   flutter_test:
