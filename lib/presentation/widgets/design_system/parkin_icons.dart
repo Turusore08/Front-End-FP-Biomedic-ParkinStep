@@ -496,6 +496,22 @@ abstract final class ParkinIcons {
     );
   }
 
+  static Widget pauseBars({
+    Color color = const Color(0xFF0077B6),
+    double size = 22,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<rect x="7" y="6" width="3.5" height="12" rx="1.2" fill="$hex"/>'
+      '<rect x="13.5" y="6" width="3.5" height="12" rx="1.2" fill="$hex"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
   static Widget stopSquare({
     Color color = const Color(0xFFDC2626),
     double size = 20,

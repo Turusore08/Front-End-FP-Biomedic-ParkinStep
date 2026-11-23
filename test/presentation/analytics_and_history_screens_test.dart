@@ -5,27 +5,85 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:parkinstep/app/app.dart';
+import 'package:parkinstep/application/ports/recorded_media_port.dart';
 import 'package:parkinstep/application/ports/report_export_port.dart';
 import 'package:parkinstep/di/analytics_providers.dart';
 import 'package:parkinstep/di/dashboard_providers.dart';
 import 'package:parkinstep/di/onboarding_providers.dart';
+import 'package:parkinstep/di/video_playback_providers.dart';
 import 'package:parkinstep/domain/constants/clinical_copy.dart';
 import 'package:parkinstep/domain/entities/consent_preferences.dart';
 import 'package:parkinstep/domain/entities/fog_episode_item.dart';
 import 'package:parkinstep/domain/entities/onboarding_status.dart';
+import 'package:parkinstep/domain/entities/recorded_pose_track.dart';
 import 'package:parkinstep/domain/entities/session_clinical_report.dart';
 import 'package:parkinstep/domain/entities/session_summary_item.dart';
 import 'package:parkinstep/domain/entities/window_prediction_item.dart';
 import 'package:parkinstep/domain/enums/medication_state.dart';
 import 'package:parkinstep/domain/enums/onboarding_auth_mode.dart';
+import 'package:parkinstep/domain/value_objects/keypoint_2d.dart';
 import 'package:parkinstep/infrastructure/export/clinical_csv_exporter.dart';
 import 'package:parkinstep/infrastructure/export/clinical_pdf_exporter.dart';
 import 'package:parkinstep/infrastructure/persistence/local_home_dashboard_repository.dart';
 import 'package:parkinstep/infrastructure/persistence/local_onboarding_repository.dart';
+import 'package:parkinstep/presentation/features/analytics/painters/recorded_skeleton_overlay_painter.dart';
 import 'package:parkinstep/presentation/features/analytics/screens/session_report_screen.dart';
 import 'package:parkinstep/presentation/features/history/screens/history_tab_screen.dart';
+import 'package:parkinstep/presentation/features/settings/screens/settings_tab_screen.dart';
 import 'package:parkinstep/presentation/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _InMemoryRecordedMediaPort implements RecordedMediaPort {
+  final Map<String, RecordedPoseTrack> tracks = <String, RecordedPoseTrack>{};
+  int deleteCalls = 0;
+  int deleteAllCalls = 0;
+
+  @override
+  Future<({String videoPath, String poseTrackPath})> saveSessionMedia({
+    required String sessionId,
+    required String sourceVideoPath,
+    required RecordedPoseTrack poseTrack,
+  }) async {
+    final posePath = 'mem://$sessionId.pose.json';
+    tracks[posePath] = poseTrack;
+    return (videoPath: sourceVideoPath, poseTrackPath: posePath);
+  }
+
+  @override
+  Future<RecordedPoseTrack?> loadPoseTrack(String poseTrackPath) async =>
+      tracks[poseTrackPath];
+
+  @override
+  Future<void> deleteSessionMedia({
+    String? videoPath,
+    String? poseTrackPath,
+  }) async {
+    deleteCalls++;
+    if (poseTrackPath != null) {
+      tracks.remove(poseTrackPath);
+    }
+  }
+
+  @override
+  Future<void> deleteAllSessionMedia() async {
+    deleteAllCalls++;
+    tracks.clear();
+  }
+
+  @override
+  Future<ExportedSkeletonVideoResult> exportSkeletonMp4({
+    required String sessionId,
+    required String sourceVideoPath,
+    required RecordedPoseTrack poseTrack,
+    required List<FogEpisodeItem> episodes,
+  }) async {
+    return ExportedSkeletonVideoResult(
+      savedPath: '/mock/Movies/ParkinStep/parkinstep_skeleton_$sessionId.mp4',
+      savedToGallery: true,
+      sizeBytes: 2048,
+    );
+  }
+}
 
 class _SyncFileTestExportPort implements ReportExportPort {
   _SyncFileTestExportPort(this.targetDir);
@@ -385,6 +443,147 @@ void main() {
         tester.getSize(find.byKey(const Key('history_session_sess-a11y-1'))).height,
         greaterThanOrEqualTo(64.0),
       );
+    });
+
+    testWidgets(
+        'S-09 hydrates & replays locally saved video + skeleton track and supports manual deletion, plus SettingsTabScreen delete-all videos @ 1.5x A11y',
+        (WidgetTester tester) async {
+      final mediaPort = _InMemoryRecordedMediaPort();
+      const posePath = 'mem://sess-video.pose.json';
+      mediaPort.tracks[posePath] = RecordedPoseTrack(
+        imageWidth: 480.0,
+        imageHeight: 640.0,
+        durationMs: 4000,
+        frames: <TimedPoseFrame>[
+          TimedPoseFrame(
+            timestampMs: 0,
+            keypoints17: List<Keypoint2D>.generate(
+              17,
+              (k) => Keypoint2D(
+                x: 200.0 + (k * 3),
+                y: 120.0 + (k * 20),
+                conf: 0.92,
+              ),
+            ),
+          ),
+          TimedPoseFrame(
+            timestampMs: 2000,
+            keypoints17: List<Keypoint2D>.generate(
+              17,
+              (k) => Keypoint2D(
+                x: 210.0 + (k * 3),
+                y: 125.0 + (k * 20),
+                conf: 0.90,
+              ),
+            ),
+          ),
+        ],
+      );
+
+      final videoSummary = SessionSummaryItem(
+        sessionId: 'sess-video',
+        startedAtUtc: DateTime.utc(2026, 11, 22, 9, 0),
+        medState: MedicationState.off,
+        fogPercentage: 18.0,
+        episodeCount: 1,
+        durationSec: 4.0,
+      );
+      final videoReport = SessionClinicalReport(
+        summary: videoSummary,
+        patientDisplayName: 'Pak Budi',
+        videoSecurelyDeleted: false,
+        recordedVideoPath: 'preview://test_s09.mp4',
+        poseTrackPath: posePath,
+        episodes: const <FogEpisodeItem>[
+          FogEpisodeItem(
+            episodeIndex: 1,
+            startSec: 1.0,
+            endSec: 2.5,
+            peakCalibratedScore: 76.0,
+            meanFreezeIndex: 1.9,
+          ),
+        ],
+      );
+      final prefs = await _seedAnalyticsPrefs(
+        sessions: <SessionSummaryItem>[videoSummary],
+        reports: <SessionClinicalReport>[videoReport],
+      );
+
+      // 1. S-09 replays & deletes saved local video + skeleton
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            recordedMediaPortProvider.overrideWithValue(mediaPort),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.lightTheme(),
+            home: const SessionReportScreen(sessionId: 'sess-video'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('video_skeleton_player_card')),
+        findsOneWidget,
+      );
+      final paintFinder =
+          find.byKey(const Key('recorded_skeleton_custom_paint'));
+      expect(paintFinder, findsOneWidget);
+      expect(
+        tester.widget<CustomPaint>(paintFinder).painter,
+        isA<RecordedSkeletonOverlayPainter>(),
+      );
+
+      await tester.ensureVisible(find.byKey(const Key('video_delete_button')));
+      await tester.tap(find.byKey(const Key('video_delete_button')));
+      await tester.pumpAndSettle();
+
+      expect(mediaPort.deleteCalls, 1);
+      expect(find.byKey(const Key('video_deleted_banner')), findsOneWidget);
+      expect(find.byKey(const Key('video_skeleton_player_card')), findsNothing);
+
+      // 2. SettingsTabScreen delete-all videos @ 360x640 with 1.5x TextScaler
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            recordedMediaPortProvider.overrideWithValue(mediaPort),
+          ],
+          child: MediaQuery(
+            data: const MediaQueryData(
+              size: Size(360, 640),
+              textScaler: TextScaler.linear(1.5),
+            ),
+            child: MaterialApp(
+              theme: AppTheme.lightTheme(),
+              home: const SettingsTabScreen(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      final deleteAllFinder =
+          find.byKey(const Key('settings_delete_all_videos_button'));
+      await tester.ensureVisible(deleteAllFinder);
+      expect(tester.getSize(deleteAllFinder).height, greaterThanOrEqualTo(56.0));
+      await tester.tap(deleteAllFinder);
+      await tester.pumpAndSettle();
+
+      expect(mediaPort.deleteAllCalls, 1);
+      expect(
+        find.byKey(const Key('settings_videos_deleted_banner')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
     });
   });
 }

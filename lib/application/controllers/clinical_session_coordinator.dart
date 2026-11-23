@@ -10,6 +10,7 @@ import '../../domain/enums/session_protocol.dart';
 import '../../domain/enums/session_stage.dart';
 import '../ports/cueing_port.dart';
 import '../ports/home_dashboard_repository_port.dart';
+import '../ports/recorded_media_port.dart';
 import '../ports/video_session_port.dart';
 import '../ports/voice_guide_port.dart';
 import '../state_machines/clinical_session_fsm.dart';
@@ -19,10 +20,12 @@ import 'metronome_coordinator.dart';
 /// Pure Dart coordinator orchestrating the video-based screening flow:
 /// opens camera preview (no live skeleton inference) -> 3-2-1 countdown ->
 /// records 2-minute guided test -> review confirmation (Ulangi / Kirim) ->
-/// post-recording Pose Extractor + LightGBM + secure temp video wipe.
+/// post-recording Pose Extractor + LightGBM + persists video & synchronized pose
+/// track privately for replay/export until deleted by the user.
 class ClinicalSessionCoordinator {
   ClinicalSessionCoordinator({
     required this.videoSessionPort,
+    required this.recordedMediaPort,
     required this.cueingPort,
     required this.voiceGuidePort,
     required this.dashboardRepository,
@@ -39,6 +42,7 @@ class ClinicalSessionCoordinator {
   static String _defaultPatientName() => 'Pengguna';
 
   final VideoSessionPort videoSessionPort;
+  final RecordedMediaPort recordedMediaPort;
   final CueingPort cueingPort;
   final VoiceGuidePort voiceGuidePort;
   final HomeDashboardRepositoryPort dashboardRepository;
@@ -197,6 +201,41 @@ class ClinicalSessionCoordinator {
     videoSessionPort.setPreviewScenario(scenario);
   }
 
+  /// Securely overwrites & deletes the completed session's stored MP4 & pose track.
+  Future<void> deleteCompletedSessionVideo() async {
+    final current = readState();
+    final record = current.completedRecord;
+    final report = record?.report;
+    if (record == null || report == null) return;
+
+    await recordedMediaPort.deleteSessionMedia(
+      videoPath: report.recordedVideoPath,
+      poseTrackPath: report.poseTrackPath,
+    );
+
+    final updatedReport = report.copyWith(
+      videoSecurelyDeleted: true,
+      clearRecordedVideoPath: true,
+      clearPoseTrackPath: true,
+      clearPoseTrack: true,
+    );
+    await dashboardRepository.saveSessionReport(updatedReport);
+
+    final updatedRecord = CompletedSessionRecord(
+      summary: record.summary,
+      peakRiskScore: record.peakRiskScore,
+      meanFreezeIndex: record.meanFreezeIndex,
+      totalFogDurationSec: record.totalFogDurationSec,
+      validLb6Ratio: record.validLb6Ratio,
+      fallGuardFalseAlarms: record.fallGuardFalseAlarms,
+      videoSecurelyDeleted: true,
+      isSimulatedPreview: record.isSimulatedPreview,
+      report: updatedReport,
+    );
+
+    writeState(readState().copyWith(completedRecord: updatedRecord));
+  }
+
   void handleLifecyclePaused() {
     _cancelTimersOnly();
     _sessionGeneration++;
@@ -211,7 +250,7 @@ class ClinicalSessionCoordinator {
     writeState(current.copyWith(isPausedByLifecycle: true));
   }
 
-  /// Stops timers & releases active camera/TTS/video resources without mutating state during dispose.
+  /// Stops timers & releases active camera/TTS resources without mutating state during dispose.
   void cancelTimersAndStreamsOnly() {
     _cancelTimersOnly();
     _sessionGeneration++;
@@ -361,12 +400,16 @@ class ClinicalSessionCoordinator {
         },
       );
 
-      if (gen != _sessionGeneration) return;
+      if (gen != _sessionGeneration) {
+        await videoSessionPort.secureDeleteVideo(videoPath);
+        return;
+      }
 
       final startedUtc = _sessionStartedUtc ?? _clock().toUtc();
+      final sessionId = 'sess_${startedUtc.microsecondsSinceEpoch}';
       final latestFsm = readState().fsm;
       final summary = SessionSummaryItem(
-        sessionId: 'sess_${startedUtc.microsecondsSinceEpoch}',
+        sessionId: sessionId,
         startedAtUtc: startedUtc,
         protocol: latestFsm.protocol,
         medState: latestFsm.medState,
@@ -374,6 +417,20 @@ class ClinicalSessionCoordinator {
         episodeCount: result.episodeCount,
         durationSec: result.durationSec,
       );
+
+      String? storedVideoPath;
+      String? storedPosePath;
+      var isDeleted = result.videoSecurelyDeleted;
+      if (result.poseTrack != null) {
+        final saved = await recordedMediaPort.saveSessionMedia(
+          sessionId: sessionId,
+          sourceVideoPath: videoPath,
+          poseTrack: result.poseTrack!,
+        );
+        storedVideoPath = saved.videoPath;
+        storedPosePath = saved.poseTrackPath;
+        isDeleted = false;
+      }
 
       final report = SessionClinicalReport(
         summary: summary,
@@ -388,8 +445,11 @@ class ClinicalSessionCoordinator {
         meanFreezeIndex: result.meanFreezeIndex,
         meanBilateralAsymmetry: result.meanBilateralAsymmetry,
         fallGuardFalseAlarms: 0,
-        videoSecurelyDeleted: result.videoSecurelyDeleted,
+        videoSecurelyDeleted: isDeleted,
         isSimulatedPreview: readState().isPreviewSimulation,
+        recordedVideoPath: storedVideoPath,
+        poseTrackPath: storedPosePath,
+        poseTrack: result.poseTrack,
         episodes: result.episodes,
         windows: result.windows,
       );
@@ -404,7 +464,7 @@ class ClinicalSessionCoordinator {
         totalFogDurationSec: result.totalFogDurationSec,
         validLb6Ratio: result.validLb6Ratio,
         fallGuardFalseAlarms: 0,
-        videoSecurelyDeleted: result.videoSecurelyDeleted,
+        videoSecurelyDeleted: isDeleted,
         isSimulatedPreview: readState().isPreviewSimulation,
         report: report,
       );
@@ -422,6 +482,7 @@ class ClinicalSessionCoordinator {
         ),
       );
     } catch (_) {
+      await videoSessionPort.secureDeleteVideo(videoPath);
       if (gen != _sessionGeneration) return;
       final latest = readState();
       writeState(
@@ -438,8 +499,6 @@ class ClinicalSessionCoordinator {
         ),
       );
       unawaited(videoSessionPort.openCameraPreview());
-    } finally {
-      await videoSessionPort.secureDeleteVideo(videoPath);
     }
   }
 }

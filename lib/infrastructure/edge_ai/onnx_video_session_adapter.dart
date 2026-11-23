@@ -12,6 +12,7 @@ import 'package:onnxruntime/onnxruntime.dart';
 
 import '../../application/ports/video_session_port.dart';
 import '../../application/state_machines/clinical_session_fsm.dart';
+import '../../domain/entities/recorded_pose_track.dart';
 import '../../domain/entities/session_clinical_report.dart';
 import '../../domain/entities/video_analysis_result.dart';
 import '../../domain/entities/window_prediction_item.dart';
@@ -31,11 +32,11 @@ class VideoAnalysisCancelledException implements Exception {
 
 /// Video-first on-device AI adapter:
 /// 1. Opens back camera WITHOUT live image stream or skeleton inference.
-/// 2. Records local temporary `.mp4` while patient performs 1 of 3 protocols.
-/// 3. On user "Kirim", sequentially extracts 15 Hz frames via native decoder,
-///    runs `yolo26n-pose.onnx` (`PoseWorker`), executes whole-trial batch exact
-///    Scenario B DSP (`POST_SESSION_EXACT`), scores `lgbm_b15hz.onnx`, and
-///    securely zero-overwrites + unlinks the temporary `.mp4`.
+/// 2. Records local `.mp4` while patient performs 1 of 3 protocols.
+/// 3. On user "Kirim", sequentially extracts 15 Hz frames + timestamps via native
+///    decoder, runs `yolo26n-pose.onnx` (`PoseWorker`), executes whole-trial batch
+///    exact Scenario B DSP (`POST_SESSION_EXACT`), scores `lgbm_b15hz.onnx`, and
+///    emits the synchronized 17-COCO [RecordedPoseTrack] for replay & export.
 class OnnxVideoSessionAdapter implements VideoSessionPort {
   OnnxVideoSessionAdapter({
     this.modelAssetPath = 'assets/models/yolo26n-pose.onnx',
@@ -50,6 +51,9 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
     defaultValue: 'nnapi',
   );
   static const List<int> _lb6Indices = <int>[11, 12, 13, 14, 15, 16];
+  static final List<Keypoint2D> _emptyKeypoints17 = List<Keypoint2D>.unmodifiable(
+    List<Keypoint2D>.filled(17, const Keypoint2D(x: 0, y: 0, conf: 0)),
+  );
 
   final ValueNotifier<CameraController?> _camera =
       ValueNotifier<CameraController?>(null);
@@ -169,13 +173,16 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
       final opened = await decoder.open(videoPath, targetFps: _targetFps);
       final totalEst = math.max(1, opened.estimatedFrames);
       final lb6Frames = <Float32List>[];
+      final timedFrames = <TimedPoseFrame>[];
+      var trackWidth = 480.0;
+      var trackHeight = 640.0;
       var processed = 0;
 
       onProgress(
         VideoAnalysisProgress(
           processedFrames: 0,
           totalFrames: totalEst,
-          stageLabelId: 'Mengekstrak sendi dari video...',
+          stageLabelId: 'Mengekstrak 17 titik skeleton dari video...',
         ),
       );
 
@@ -183,13 +190,21 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
         if (_cancelRequested) {
           throw const VideoAnalysisCancelledException();
         }
-        final frame = await decoder.nextFrame();
-        if (frame == null) break;
+        final decoded = await decoder.nextFrame();
+        if (decoded == null) break;
         if (_cancelRequested) {
           throw const VideoAnalysisCancelledException();
         }
 
-        final pose = await worker.process(frame);
+        final pose = await worker.process(decoded.frame);
+        trackWidth = pose.meta.imageWidth.toDouble();
+        trackHeight = pose.meta.imageHeight.toDouble();
+        timedFrames.add(
+          TimedPoseFrame(
+            timestampMs: decoded.timestampMs,
+            keypoints17: pose.keypoints ?? _emptyKeypoints17,
+          ),
+        );
         lb6Frames.add(_packLb6Frame(pose.keypoints));
         processed++;
 
@@ -197,7 +212,8 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
           VideoAnalysisProgress(
             processedFrames: processed,
             totalFrames: math.max(totalEst, processed),
-            stageLabelId: 'Mengekstrak sendi dari video ($processed frame)...',
+            stageLabelId:
+                'Mengekstrak 17 titik skeleton ($processed frame)...',
           ),
         );
       }
@@ -210,7 +226,7 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
         VideoAnalysisProgress(
           processedFrames: processed,
           totalFrames: processed,
-          stageLabelId: 'Menghitung skor FoG & menghapus video...',
+          stageLabelId: 'Menghitung skor FoG & menyinkronkan skeleton...',
         ),
       );
 
@@ -286,6 +302,16 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
       final durationSec = opened.durationMs > 0
           ? opened.durationMs / 1000.0
           : math.max(processed / _targetFps, fallbackDurationSec);
+      final durationMs = opened.durationMs > 0
+          ? opened.durationMs
+          : (durationSec * 1000).round();
+
+      final poseTrack = RecordedPoseTrack(
+        imageWidth: trackWidth,
+        imageHeight: trackHeight,
+        durationMs: durationMs,
+        frames: List<TimedPoseFrame>.unmodifiable(timedFrames),
+      );
 
       return VideoAnalysisResult(
         durationSec: double.parse(durationSec.toStringAsFixed(1)),
@@ -302,13 +328,17 @@ class OnnxVideoSessionAdapter implements VideoSessionPort {
         meanFreezeIndex: double.parse(meanFi.toStringAsFixed(2)),
         meanBilateralAsymmetry: double.parse(meanAsym.toStringAsFixed(3)),
         thresholdUsed: OnnxFogClassifier.threshold,
-        videoSecurelyDeleted: true,
+        videoSecurelyDeleted: false,
         episodes: episodes,
         windows: postWindows,
+        poseTrack: poseTrack,
       );
+    } catch (_) {
+      // Wipe the temporary recording only on cancellation or failure.
+      await secureDeleteVideo(videoPath);
+      rethrow;
     } finally {
       await decoder.close();
-      await secureDeleteVideo(videoPath);
     }
   }
 

@@ -3,15 +3,17 @@ import 'dart:math' as math;
 
 import '../../application/ports/video_session_port.dart';
 import '../../application/state_machines/clinical_session_fsm.dart';
+import '../../domain/entities/recorded_pose_track.dart';
 import '../../domain/entities/session_clinical_report.dart';
 import '../../domain/entities/video_analysis_result.dart';
 import '../../domain/entities/window_prediction_item.dart';
 import '../../domain/enums/preview_gait_scenario.dart';
 import '../../domain/enums/session_protocol.dart';
 import '../../domain/value_objects/calibrated_risk_score.dart';
+import '../../domain/value_objects/keypoint_2d.dart';
 
-/// Deterministic synthetic [VideoSessionPort] for Flutter widget tests and
-/// preview builds without physical camera/ONNX execution.
+/// Deterministic synthetic [VideoSessionPort] producing realistic 15 Hz 17-COCO
+/// skeleton playback tracks for widget tests and non-camera preview builds.
 class PreviewVideoSessionAdapter implements VideoSessionPort {
   PreviewGaitScenario _scenario = PreviewGaitScenario.normalGait;
   bool _cancelRequested = false;
@@ -60,13 +62,13 @@ class PreviewVideoSessionAdapter implements VideoSessionPort {
   }) async {
     _cancelRequested = false;
     final durSec = math.max(4.0, fallbackDurationSec);
-    final totalFrames = math.max(30, (durSec * 15).round());
+    final totalFrames = math.max(45, (durSec * 15).round());
 
     onProgress(
       VideoAnalysisProgress(
         processedFrames: (totalFrames * 0.25).round(),
         totalFrames: totalFrames,
-        stageLabelId: 'Mengekstrak sendi dari video...',
+        stageLabelId: 'Mengekstrak 17 titik skeleton dari video...',
       ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -78,7 +80,7 @@ class PreviewVideoSessionAdapter implements VideoSessionPort {
       VideoAnalysisProgress(
         processedFrames: (totalFrames * 0.70).round(),
         totalFrames: totalFrames,
-        stageLabelId: 'Menghitung fitur FFT & Freeze Index...',
+        stageLabelId: 'Menghitung fitur FFT & menyinkronkan skeleton...',
       ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -135,11 +137,25 @@ class PreviewVideoSessionAdapter implements VideoSessionPort {
             .reduce((a, b) => a + b) /
         postWindows.length;
 
+    final timedFrames = List<TimedPoseFrame>.generate(totalFrames, (idx) {
+      final tMs = ((idx * 1000) / 15.0).round();
+      final tSec = tMs / 1000.0;
+      final inFog = episodes.any((e) => tSec >= e.startSec && tSec <= e.endSec);
+      return TimedPoseFrame(
+        timestampMs: tMs,
+        keypoints17: _syntheticKeypointsFor(
+          tSec: tSec,
+          protocol: protocol,
+          inFog: inFog,
+        ),
+      );
+    });
+
     onProgress(
       VideoAnalysisProgress(
         processedFrames: totalFrames,
         totalFrames: totalFrames,
-        stageLabelId: 'Menghapus video sementara secara otomatis...',
+        stageLabelId: 'Menyiapkan video rekaman beserta skeleton...',
       ),
     );
 
@@ -159,9 +175,62 @@ class PreviewVideoSessionAdapter implements VideoSessionPort {
       meanFreezeIndex: double.parse(meanFi.toStringAsFixed(2)),
       meanBilateralAsymmetry: double.parse(meanAsym.toStringAsFixed(3)),
       thresholdUsed: CalibratedRiskScore.defaultLightGbmThreshold,
-      videoSecurelyDeleted: true,
+      videoSecurelyDeleted: false,
       episodes: episodes,
       windows: postWindows,
+      poseTrack: RecordedPoseTrack(
+        imageWidth: 480,
+        imageHeight: 640,
+        durationMs: (durSec * 1000).round(),
+        frames: List<TimedPoseFrame>.unmodifiable(timedFrames),
+      ),
     );
+  }
+
+  static List<Keypoint2D> _syntheticKeypointsFor({
+    required double tSec,
+    required SessionProtocol protocol,
+    required bool inFog,
+  }) {
+    final swing = inFog
+        ? math.sin(tSec * 28.0) * 6.0
+        : switch (protocol) {
+            SessionProtocol.turning360 => math.sin(tSec * 2.6) * 24.0,
+            SessionProtocol.walkBackAndForth => math.sin(tSec * 3.0) * 30.0,
+            SessionProtocol.sitToStand => 0.0,
+          };
+    final verticalShift = (!inFog && protocol == SessionProtocol.sitToStand)
+        ? (0.5 - 0.5 * math.cos(tSec * 1.4)) * 55.0
+        : 0.0;
+    final horizontalWalk =
+        protocol == SessionProtocol.walkBackAndForth
+            ? math.sin(tSec * 0.7) * 28.0
+            : 0.0;
+
+    final hipY = 330.0 + verticalShift;
+    final kneeY = 445.0 + verticalShift * 0.35;
+    const ankleY = 560.0;
+    const conf = 0.94;
+    final cx = 240.0 + horizontalWalk;
+
+    return List<Keypoint2D>.unmodifiable(<Keypoint2D>[
+      Keypoint2D(x: cx, y: 120 + verticalShift, conf: conf),
+      Keypoint2D(x: cx - 10, y: 112 + verticalShift, conf: conf),
+      Keypoint2D(x: cx + 10, y: 112 + verticalShift, conf: conf),
+      Keypoint2D(x: cx - 22, y: 118 + verticalShift, conf: conf),
+      Keypoint2D(x: cx + 22, y: 118 + verticalShift, conf: conf),
+      Keypoint2D(x: cx - 44, y: 185 + verticalShift, conf: conf),
+      Keypoint2D(x: cx + 44, y: 185 + verticalShift, conf: conf),
+      Keypoint2D(x: cx - 64, y: 260 + verticalShift, conf: conf),
+      Keypoint2D(x: cx + 64, y: 260 + verticalShift, conf: conf),
+      Keypoint2D(x: cx - 70, y: 325 + verticalShift, conf: conf),
+      Keypoint2D(x: cx + 70, y: 325 + verticalShift, conf: conf),
+      Keypoint2D(x: cx - 30, y: hipY, conf: conf),
+      Keypoint2D(x: cx + 30, y: hipY, conf: conf),
+      Keypoint2D(x: cx - 36 + swing * 0.5, y: kneeY, conf: conf),
+      Keypoint2D(x: cx + 36 - swing * 0.5, y: kneeY, conf: conf),
+      Keypoint2D(x: cx - 40 + swing, y: ankleY - swing.abs() * 0.35, conf: conf),
+      Keypoint2D(x: cx + 40 - swing, y: ankleY - swing.abs() * 0.35, conf: conf),
+    ]);
   }
 }

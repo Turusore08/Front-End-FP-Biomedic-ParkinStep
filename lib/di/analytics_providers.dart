@@ -6,6 +6,7 @@ import '../infrastructure/export/local_report_export_adapter.dart';
 import 'clinical_session_providers.dart';
 import 'dashboard_providers.dart';
 import 'onboarding_providers.dart';
+import 'video_playback_providers.dart';
 
 final reportExportPortProvider = Provider<ReportExportPort>(
   (ref) => LocalReportExportAdapter(),
@@ -29,6 +30,15 @@ final sessionReportByIdProvider =
     final repo = ref.read(homeDashboardRepositoryProvider);
     final persistedReport = await repo.loadSessionReport(sessionId);
     if (persistedReport != null) {
+      if (persistedReport.poseTrack == null &&
+          persistedReport.poseTrackPath != null) {
+        final loadedTrack = await ref
+            .read(recordedMediaPortProvider)
+            .loadPoseTrack(persistedReport.poseTrackPath!);
+        if (loadedTrack != null) {
+          return persistedReport.copyWith(poseTrack: loadedTrack);
+        }
+      }
       return persistedReport;
     }
 

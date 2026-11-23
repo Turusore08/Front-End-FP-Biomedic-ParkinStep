@@ -1,4 +1,5 @@
 import 'fog_episode_item.dart';
+import 'recorded_pose_track.dart';
 import 'window_prediction_item.dart';
 
 /// Incremental progress update emitted while decoding video and extracting poses.
@@ -38,6 +39,7 @@ class VideoAnalysisResult {
     required this.videoSecurelyDeleted,
     required this.episodes,
     required this.windows,
+    this.poseTrack,
   });
 
   final double durationSec;
@@ -56,4 +58,5 @@ class VideoAnalysisResult {
   final bool videoSecurelyDeleted;
   final List<FogEpisodeItem> episodes;
   final List<WindowPredictionItem> windows;
+  final RecordedPoseTrack? poseTrack;
 }

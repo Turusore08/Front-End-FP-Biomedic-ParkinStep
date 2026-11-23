@@ -1,4 +1,5 @@
 import 'fog_episode_item.dart';
+import 'recorded_pose_track.dart';
 import 'session_summary_item.dart';
 import 'window_prediction_item.dart';
 
@@ -20,6 +21,9 @@ class SessionClinicalReport {
     this.fallGuardFalseAlarms = 0,
     this.videoSecurelyDeleted = true,
     this.isSimulatedPreview = false,
+    this.recordedVideoPath,
+    this.poseTrackPath,
+    this.poseTrack,
     this.episodes = const <FogEpisodeItem>[],
     this.windows = const <WindowPredictionItem>[],
   });
@@ -39,8 +43,49 @@ class SessionClinicalReport {
   final int fallGuardFalseAlarms;
   final bool videoSecurelyDeleted;
   final bool isSimulatedPreview;
+  final String? recordedVideoPath;
+  final String? poseTrackPath;
+  final RecordedPoseTrack? poseTrack;
   final List<FogEpisodeItem> episodes;
   final List<WindowPredictionItem> windows;
+
+  SessionClinicalReport copyWith({
+    SessionSummaryItem? summary,
+    bool? videoSecurelyDeleted,
+    String? recordedVideoPath,
+    bool clearRecordedVideoPath = false,
+    String? poseTrackPath,
+    bool clearPoseTrackPath = false,
+    RecordedPoseTrack? poseTrack,
+    bool clearPoseTrack = false,
+  }) {
+    return SessionClinicalReport(
+      summary: summary ?? this.summary,
+      patientDisplayName: patientDisplayName,
+      classifierUsed: classifierUsed,
+      modelBundleVersion: modelBundleVersion,
+      thresholdUsed: thresholdUsed,
+      validLb6Ratio: validLb6Ratio,
+      totalFogDurationSec: totalFogDurationSec,
+      medianEpisodeDurationSec: medianEpisodeDurationSec,
+      locomotorBandEnergy: locomotorBandEnergy,
+      freezeBandEnergy: freezeBandEnergy,
+      meanFreezeIndex: meanFreezeIndex,
+      meanBilateralAsymmetry: meanBilateralAsymmetry,
+      fallGuardFalseAlarms: fallGuardFalseAlarms,
+      videoSecurelyDeleted: videoSecurelyDeleted ?? this.videoSecurelyDeleted,
+      isSimulatedPreview: isSimulatedPreview,
+      recordedVideoPath: clearRecordedVideoPath
+          ? null
+          : (recordedVideoPath ?? this.recordedVideoPath),
+      poseTrackPath: clearPoseTrackPath
+          ? null
+          : (poseTrackPath ?? this.poseTrackPath),
+      poseTrack: clearPoseTrack ? null : (poseTrack ?? this.poseTrack),
+      episodes: episodes,
+      windows: windows,
+    );
+  }
 
   String get asymmetryLevelId {
     if (meanBilateralAsymmetry < 0.12) return 'Rendah';

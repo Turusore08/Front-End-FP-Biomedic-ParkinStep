@@ -6,6 +6,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../../../application/ports/report_export_port.dart';
 import '../../../../application/use_cases/export_clinical_report.dart';
 import '../../../../di/analytics_providers.dart';
+import '../../../../di/clinical_session_providers.dart';
+import '../../../../di/dashboard_providers.dart';
+import '../../../../di/video_playback_providers.dart';
 import '../../../../domain/constants/clinical_copy.dart';
 import '../../../../domain/entities/session_clinical_report.dart';
 import '../../../theme/app_colors.dart';
@@ -16,6 +19,7 @@ import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
 import '../../../widgets/design_system/parkin_state_cards.dart';
 import '../widgets/fog_timeline_chart.dart';
 import '../widgets/spectral_freeze_index_chart.dart';
+import '../widgets/video_skeleton_player_card.dart';
 
 /// S-09: Post-Session Clinical Analytics Summary (`FogTimelineChart`,
 /// `SpectralFreezeIndexChart`) & Offline Neurologist A4 PDF / CSV Export.
@@ -262,6 +266,38 @@ class _SessionReportScreenState extends ConsumerState<SessionReportScreen> {
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+
+          // Putar Ulang Video & Skeleton 17-COCO
+          VideoSkeletonPlayerCard(
+            report: report,
+            onDeleteVideo: () async {
+              await ref.read(recordedMediaPortProvider).deleteSessionMedia(
+                videoPath: report.recordedVideoPath,
+                poseTrackPath: report.poseTrackPath,
+              );
+              final updated = report.copyWith(
+                videoSecurelyDeleted: true,
+                clearRecordedVideoPath: true,
+                clearPoseTrackPath: true,
+                clearPoseTrack: true,
+              );
+              await ref
+                  .read(homeDashboardRepositoryProvider)
+                  .saveSessionReport(updated);
+              final currentCompletedId = ref
+                  .read(clinicalSessionControllerProvider)
+                  .completedRecord
+                  ?.summary
+                  .sessionId;
+              if (currentCompletedId == widget.sessionId) {
+                await ref
+                    .read(clinicalSessionControllerProvider.notifier)
+                    .deleteCompletedSessionVideo();
+              }
+              ref.invalidate(sessionReportByIdProvider(widget.sessionId));
+            },
           ),
           const SizedBox(height: 16),
 

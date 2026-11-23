@@ -191,6 +191,8 @@ class LocalHomeDashboardRepository implements HomeDashboardRepositoryPort {
       'fall_guard_false_alarms': r.fallGuardFalseAlarms,
       'video_securely_deleted': r.videoSecurelyDeleted,
       'is_simulated_preview': r.isSimulatedPreview,
+      'recorded_video_path': r.recordedVideoPath,
+      'pose_track_path': r.poseTrackPath,
       'episodes': r.episodes
           .map(
             (ep) => <String, Object?>{
@@ -309,6 +311,14 @@ class LocalHomeDashboardRepository implements HomeDashboardRepositoryPort {
       fallGuardFalseAlarms: _readInt(map['fall_guard_false_alarms']) ?? 0,
       videoSecurelyDeleted: map['video_securely_deleted'] != false,
       isSimulatedPreview: map['is_simulated_preview'] == true,
+      recordedVideoPath: map['recorded_video_path'] is String &&
+              (map['recorded_video_path']! as String).isNotEmpty
+          ? map['recorded_video_path']! as String
+          : null,
+      poseTrackPath: map['pose_track_path'] is String &&
+              (map['pose_track_path']! as String).isNotEmpty
+          ? map['pose_track_path']! as String
+          : null,
       episodes: List<FogEpisodeItem>.unmodifiable(episodes),
       windows: List<WindowPredictionItem>.unmodifiable(windows),
     );

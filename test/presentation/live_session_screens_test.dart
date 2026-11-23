@@ -4,14 +4,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:parkinstep/app/app.dart';
 import 'package:parkinstep/application/ports/cueing_port.dart';
+import 'package:parkinstep/application/ports/recorded_media_port.dart';
 import 'package:parkinstep/application/ports/voice_guide_port.dart';
 import 'package:parkinstep/di/onboarding_providers.dart';
 import 'package:parkinstep/di/session_prep_providers.dart';
+import 'package:parkinstep/di/video_playback_providers.dart';
 import 'package:parkinstep/domain/constants/clinical_copy.dart';
 import 'package:parkinstep/domain/entities/consent_preferences.dart';
+import 'package:parkinstep/domain/entities/fog_episode_item.dart';
 import 'package:parkinstep/domain/entities/onboarding_status.dart';
+import 'package:parkinstep/domain/entities/recorded_pose_track.dart';
 import 'package:parkinstep/domain/enums/onboarding_auth_mode.dart';
 import 'package:parkinstep/infrastructure/persistence/local_onboarding_repository.dart';
+import 'package:parkinstep/presentation/features/analytics/painters/recorded_skeleton_overlay_painter.dart';
 import 'package:parkinstep/presentation/features/live_session/screens/live_session_screen.dart';
 import 'package:parkinstep/presentation/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -53,6 +58,60 @@ class _SpyVoiceGuidePort implements VoiceGuidePort {
   }
 }
 
+class _InMemoryRecordedMediaPort implements RecordedMediaPort {
+  final Map<String, RecordedPoseTrack> _tracks = <String, RecordedPoseTrack>{};
+  int deleteCalls = 0;
+  int deleteAllCalls = 0;
+  final List<String> exportedSessions = <String>[];
+
+  @override
+  Future<({String videoPath, String poseTrackPath})> saveSessionMedia({
+    required String sessionId,
+    required String sourceVideoPath,
+    required RecordedPoseTrack poseTrack,
+  }) async {
+    final posePath = 'mem://$sessionId.pose.json';
+    _tracks[posePath] = poseTrack;
+    return (videoPath: sourceVideoPath, poseTrackPath: posePath);
+  }
+
+  @override
+  Future<RecordedPoseTrack?> loadPoseTrack(String poseTrackPath) async =>
+      _tracks[poseTrackPath];
+
+  @override
+  Future<void> deleteSessionMedia({
+    String? videoPath,
+    String? poseTrackPath,
+  }) async {
+    deleteCalls++;
+    if (poseTrackPath != null) {
+      _tracks.remove(poseTrackPath);
+    }
+  }
+
+  @override
+  Future<void> deleteAllSessionMedia() async {
+    deleteAllCalls++;
+    _tracks.clear();
+  }
+
+  @override
+  Future<ExportedSkeletonVideoResult> exportSkeletonMp4({
+    required String sessionId,
+    required String sourceVideoPath,
+    required RecordedPoseTrack poseTrack,
+    required List<FogEpisodeItem> episodes,
+  }) async {
+    exportedSessions.add(sessionId);
+    return ExportedSkeletonVideoResult(
+      savedPath: '/mock/Movies/ParkinStep/parkinstep_skeleton_$sessionId.mp4',
+      savedToGallery: true,
+      sizeBytes: 4096,
+    );
+  }
+}
+
 Future<SharedPreferences> _seedCompletedPrefs() async {
   SharedPreferences.setMockInitialValues(<String, Object>{});
   final prefs = await SharedPreferences.getInstance();
@@ -84,6 +143,7 @@ void main() {
       final prefs = await _seedCompletedPrefs();
       final cueing = _SpyCueingPort();
       final voice = _SpyVoiceGuidePort();
+      final mediaPort = _InMemoryRecordedMediaPort();
 
       await tester.pumpWidget(
         ProviderScope(
@@ -91,6 +151,7 @@ void main() {
             sharedPreferencesProvider.overrideWithValue(prefs),
             cueingPortProvider.overrideWithValue(cueing),
             voiceGuideProvider.overrideWithValue(voice),
+            recordedMediaPortProvider.overrideWithValue(mediaPort),
           ],
           child: const ParkinStepApp(),
         ),
@@ -200,6 +261,72 @@ void main() {
       );
       expect(find.text('Ringkasan Tes Duduk-Berdiri'), findsOneWidget);
 
+      // 6b. Video + Skeleton replay controls, toggle, MP4 export, and manual local delete
+      expect(
+        find.byKey(const Key('video_skeleton_player_card')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('video_skeleton_viewport')), findsOneWidget);
+      final skeletonPaintFinder =
+          find.byKey(const Key('recorded_skeleton_custom_paint'));
+      expect(skeletonPaintFinder, findsOneWidget);
+      final skeletonPaint = tester.widget<CustomPaint>(skeletonPaintFinder);
+      expect(skeletonPaint.painter, isA<RecordedSkeletonOverlayPainter>());
+
+      await tester.ensureVisible(
+        find.byKey(const Key('video_play_pause_button')),
+      );
+      await tester.tap(find.byKey(const Key('video_play_pause_button')));
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.text('Jeda Video'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('video_play_pause_button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Putar Video'), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('video_forward_button')));
+      await tester.tap(find.byKey(const Key('video_forward_button')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('video_rewind_button')));
+      await tester.pump();
+
+      await tester.ensureVisible(
+        find.byKey(const Key('video_skeleton_toggle_button')),
+      );
+      await tester.tap(find.byKey(const Key('video_skeleton_toggle_button')));
+      await tester.pump();
+      expect(find.text('Skeleton: Off'), findsOneWidget);
+      expect(
+        find.byKey(const Key('recorded_skeleton_custom_paint')),
+        findsNothing,
+      );
+
+      await tester.tap(find.byKey(const Key('video_skeleton_toggle_button')));
+      await tester.pump();
+      expect(find.text('Skeleton: On'), findsOneWidget);
+      expect(
+        find.byKey(const Key('recorded_skeleton_custom_paint')),
+        findsOneWidget,
+      );
+
+      await tester.ensureVisible(
+        find.byKey(const Key('video_export_mp4_button')),
+      );
+      await tester.tap(find.byKey(const Key('video_export_mp4_button')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('video_export_status_banner')),
+        findsOneWidget,
+      );
+      expect(mediaPort.exportedSessions.length, 1);
+
+      await tester.ensureVisible(find.byKey(const Key('video_delete_button')));
+      await tester.tap(find.byKey(const Key('video_delete_button')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('video_deleted_banner')), findsOneWidget);
+      expect(find.byKey(const Key('video_skeleton_player_card')), findsNothing);
+      expect(mediaPort.deleteCalls, 1);
+
       // 7. Return to S-03 Home & verify Duduk-Berdiri session persisted
       await tester.ensureVisible(find.byKey(const Key('summary_home_button')));
       await tester.tap(find.byKey(const Key('summary_home_button')));
@@ -211,11 +338,12 @@ void main() {
     });
 
     testWidgets(
-        'A11y 360x640 @ 1.5x TextScaler: Ready, Countdown, Recording, Review & Analyzing render zero overflow & >= 56/64dp touch targets',
+        'A11y 360x640 @ 1.5x TextScaler: Ready, Countdown, Recording, Review, Analyzing & Summary Video Player render zero overflow & >= 56/64dp touch targets',
         (WidgetTester tester) async {
       final prefs = await _seedCompletedPrefs();
       final cueing = _SpyCueingPort();
       final voice = _SpyVoiceGuidePort();
+      final mediaPort = _InMemoryRecordedMediaPort();
 
       tester.view.physicalSize = const Size(360, 640);
       tester.view.devicePixelRatio = 1.0;
@@ -228,6 +356,7 @@ void main() {
             sharedPreferencesProvider.overrideWithValue(prefs),
             cueingPortProvider.overrideWithValue(cueing),
             voiceGuideProvider.overrideWithValue(voice),
+            recordedMediaPortProvider.overrideWithValue(mediaPort),
           ],
           child: MediaQuery(
             data: const MediaQueryData(
@@ -316,6 +445,27 @@ void main() {
         greaterThanOrEqualTo(56.0),
       );
       await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('video_skeleton_player_card')),
+        findsOneWidget,
+      );
+
+      final playPauseFinder = find.byKey(const Key('video_play_pause_button'));
+      await tester.ensureVisible(playPauseFinder);
+      expect(tester.getSize(playPauseFinder).height, greaterThanOrEqualTo(64.0));
+
+      for (final key in const <Key>[
+        Key('video_rewind_button'),
+        Key('video_forward_button'),
+        Key('video_skeleton_toggle_button'),
+        Key('video_export_mp4_button'),
+        Key('video_delete_button'),
+      ]) {
+        final finder = find.byKey(key);
+        await tester.ensureVisible(finder);
+        expect(tester.getSize(finder).height, greaterThanOrEqualTo(56.0));
+      }
       expect(tester.takeException(), isNull);
     });
   });

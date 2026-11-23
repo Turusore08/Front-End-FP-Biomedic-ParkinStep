@@ -15,6 +15,7 @@ import '../infrastructure/edge_ai/preview_video_session_adapter.dart';
 import 'dashboard_providers.dart';
 import 'onboarding_providers.dart';
 import 'session_prep_providers.dart';
+import 'video_playback_providers.dart';
 
 final previewVideoSessionAdapterProvider = Provider<PreviewVideoSessionAdapter>(
   (ref) => PreviewVideoSessionAdapter(),
@@ -54,6 +55,7 @@ class ClinicalSessionController extends Notifier<ClinicalSessionUiState> {
   ClinicalSessionUiState build() {
     _coordinator = ClinicalSessionCoordinator(
       videoSessionPort: ref.read(videoSessionPortProvider),
+      recordedMediaPort: ref.read(recordedMediaPortProvider),
       cueingPort: ref.read(cueingPortProvider),
       voiceGuidePort: ref.read(voiceGuideProvider),
       dashboardRepository: ref.read(homeDashboardRepositoryProvider),
@@ -85,6 +87,9 @@ class ClinicalSessionController extends Notifier<ClinicalSessionUiState> {
       _coordinator.submitVideoForAnalysis();
 
   Future<void> cancelAnalysis() => _coordinator.cancelAnalysis();
+
+  Future<void> deleteCompletedSessionVideo() =>
+      _coordinator.deleteCompletedSessionVideo();
 
   void toggleSound() => _coordinator.toggleSound();
 

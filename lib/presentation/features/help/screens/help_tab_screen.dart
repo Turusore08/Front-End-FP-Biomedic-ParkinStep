@@ -68,9 +68,9 @@ class HelpTabScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 10),
               const _GuideCard(
-                title: '4. Ekstraksi Pose Lokal & Hapus Otomatis',
+                title: '4. Video Skeleton Privat di HP Anda',
                 body:
-                    'Setelah Anda menekan Kirim, Pose Extractor menganalisis video langsung di ponsel Anda dan langsung menghapus berkas video secara otomatis.',
+                    'Setelah Anda menekan Kirim, Pose Extractor memetakan skeleton langsung di HP. Video beserta garis skeleton dapat diputar ulang, diekspor ke MP4, atau dihapus manual kapan saja.',
               ),
               const SizedBox(height: 18),
               Container(

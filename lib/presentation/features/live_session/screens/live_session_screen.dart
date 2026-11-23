@@ -20,6 +20,7 @@ import '../../../widgets/design_system/parkin_primary_pill_button.dart';
 import '../../../widgets/design_system/parkin_progress_pill.dart';
 import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
 import '../../../widgets/design_system/parkin_state_cards.dart';
+import '../../analytics/widgets/video_skeleton_player_card.dart';
 import '../widgets/live_camera_backdrop.dart';
 
 /// Unified video-based screening flow hosting:
@@ -158,6 +159,7 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen>
           uiState: uiState,
           onOpenReport: (String sessionId) =>
               context.push('/session-report/$sessionId'),
+          onDeleteVideo: _controller.deleteCompletedSessionVideo,
           onGoHistory: () => context.go('/history'),
           onGoHome: () => context.go('/home'),
         );
@@ -815,12 +817,14 @@ class _PostSessionSummaryView extends StatelessWidget {
   const _PostSessionSummaryView({
     required this.uiState,
     required this.onOpenReport,
+    required this.onDeleteVideo,
     required this.onGoHistory,
     required this.onGoHome,
   });
 
   final ClinicalSessionUiState uiState;
   final ValueChanged<String> onOpenReport;
+  final Future<void> Function() onDeleteVideo;
   final VoidCallback onGoHistory;
   final VoidCallback onGoHome;
 
@@ -883,7 +887,9 @@ class _PostSessionSummaryView extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Video sementara telah dihapus otomatis dari perangkat Anda.',
+                        (record != null && !record.videoSecurelyDeleted)
+                            ? 'Video & skeleton tersimpan privat di HP untuk diputar ulang atau dihapus kapan saja.'
+                            : 'Video sementara tidak tersimpan / telah dihapus dari perangkat.',
                         style: AppTypography.captionBadge(
                           color: AppColors.emeraldDarkText,
                           weight: FontWeight.w600,
@@ -893,6 +899,13 @@ class _PostSessionSummaryView extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
+                if (record?.report != null) ...[
+                  VideoSkeletonPlayerCard(
+                    report: record!.report!,
+                    onDeleteVideo: onDeleteVideo,
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(

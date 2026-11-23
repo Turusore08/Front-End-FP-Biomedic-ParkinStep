@@ -26,7 +26,7 @@ abstract final class ClinicalCopy {
 
   static const String consentLocalTitle = 'Analisis Kamera Lokal';
   static const String consentLocalDesc =
-      'Video diproses langsung di HP dan langsung dihapus setelah sendi terbaca.';
+      'Video diproses langsung di HP tanpa dikirim ke internet dan dapat Anda hapus kapan saja.';
 
   static const String consentSyncTitle = 'Bagikan Ringkasan ke Dokter';
   static const String consentSyncDesc =
@@ -56,9 +56,9 @@ abstract final class ClinicalCopy {
   static const String emptyHistoryCta = 'Mulai Tes Pertama';
   static const String privacyShieldTitle = 'Perlindungan Privasi & Data';
   static const String privacyShieldGuarantee =
-      'Video rekaman diproses langsung oleh Pose Extractor di ponsel Anda dan otomatis dihapus segera setelah analisis selesai.';
+      'Video rekaman diproses oleh Pose Extractor langsung di HP, disimpan di folder privat aplikasi agar bisa diputar ulang dengan skeleton, dan tidak pernah dikirim ke server tanpa persetujuan Anda.';
   static const String helpVoiceGuideDetail =
-      'Panduan penggunaan ParkinStep berbasis video. Pertama, pilih salah satu dari tiga jenis tes dua menit, yaitu Tes Berputar 360 derajat, Tes Berjalan Bolak-Balik, atau Tes Duduk Berdiri. Kedua, posisikan ponsel setinggi pinggang pada jarak dua hingga tiga meter agar pinggul sampai mata kaki terlihat penuh. Ketiga, ikuti aba-aba suara dan teks saat merekam, lalu tekan Kirim setelah selesai agar Pose Extractor memproses video langsung di ponsel dan menghapus video secara otomatis.';
+      'Panduan penggunaan ParkinStep berbasis video. Pertama, pilih salah satu dari tiga jenis tes dua menit, yaitu Tes Berputar 360 derajat, Tes Berjalan Bolak-Balik, atau Tes Duduk Berdiri. Kedua, posisikan ponsel setinggi pinggang pada jarak dua hingga tiga meter agar pinggul sampai mata kaki terlihat penuh. Ketiga, ikuti aba-aba suara dan teks saat merekam, lalu tekan Kirim setelah selesai agar Pose Extractor memproses video langsung di ponsel dan menampilkan video rekaman beserta garis skeletonnya.';
 
   // Test Selection Screen
   static const String testSelectionTitle = 'Pilih Jenis Tes';
@@ -105,7 +105,7 @@ abstract final class ClinicalCopy {
       'Posisikan pinggul sampai mata kaki di dalam bingkai, lalu tekan Mulai Rekam dan ikuti perintah di layar.';
   static const String reviewRecordedTitle = 'Rekaman Selesai';
   static const String reviewPrivacyGuarantee =
-      'Video hanya disimpan sementara di HP ini dan akan otomatis dihapus permanen begitu analisis selesai.';
+      'Video disimpan aman di folder privat HP ini agar Anda bisa memutar ulang video beserta skeletonnya, dan bisa dihapus kapan saja.';
   static const String reviewShortVideoWarning =
       'Durasi rekaman kurang dari 3 detik. Silakan ulangi rekaman minimal 3 detik agar analisis FoG valid.';
 
@@ -116,7 +116,7 @@ abstract final class ClinicalCopy {
 
   static const String loadingDspTitle = 'Mengekstrak pose dari video...';
   static const String loadingDspBody =
-      'Pose Extractor menganalisis gerakan secara offline di HP Anda dan otomatis menghapus video sementara setelah selesai.';
+      'Pose Extractor memetakan 17 titik skeleton dan menghitung skor FoG secara offline di HP Anda.';
 
   // S-06 Two-Tier Highlight Prompts
   static const String livePromptNormalHighlight = 'BERPUTAR PERLAHAN';
