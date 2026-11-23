@@ -13,6 +13,7 @@ import '../presentation/features/metronome/screens/metronome_ras_screen.dart';
 import '../presentation/features/onboarding/screens/consent_screen.dart';
 import '../presentation/features/onboarding/screens/welcome_screen.dart';
 import '../presentation/features/session_prep/screens/pre_flight_checklist_screen.dart';
+import '../presentation/features/session_prep/screens/test_selection_screen.dart';
 import '../presentation/features/settings/screens/settings_tab_screen.dart';
 
 /// Listenable bridge notifying GoRouter whenever persisted onboarding completion changes.
@@ -25,6 +26,7 @@ const Set<String> _protectedShellPaths = <String>{
   '/history',
   '/help',
   '/settings',
+  '/select-test',
   '/pre-flight',
   '/metronome',
   '/session-live',
@@ -67,6 +69,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/consent',
         builder: (context, state) => const ConsentScreen(),
+      ),
+      GoRoute(
+        path: '/select-test',
+        builder: (context, state) => const TestSelectionScreen(),
       ),
       GoRoute(
         path: '/pre-flight',

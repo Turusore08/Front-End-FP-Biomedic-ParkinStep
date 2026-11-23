@@ -1,4 +1,5 @@
 import '../../domain/enums/medication_state.dart';
+import '../../domain/enums/session_protocol.dart';
 import 'pre_flight_ui_state.dart';
 
 /// Pure Dart coordinator governing S-04 safety checklist completion and gating.
@@ -12,6 +13,17 @@ class PreFlightCoordinator {
   final PreFlightUiState Function() readState;
   final void Function(PreFlightUiState next) writeState;
   final DateTime Function() _clock;
+
+  void selectProtocol(SessionProtocol protocol) {
+    final current = readState();
+    writeState(
+      current.copyWith(
+        checklist: current.checklist.copyWith(protocol: protocol),
+        isConfirmed: false,
+        clearConfirmedAt: true,
+      ),
+    );
+  }
 
   void toggleFloorSafe() {
     final current = readState();

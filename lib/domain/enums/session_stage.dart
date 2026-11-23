@@ -1,10 +1,9 @@
-/// Lifecycle stages for S-05 framing/calibration, S-06 live HUD, S-08 fall guard & post-DSP.
+/// Lifecycle stages for video-based gait recording & post-recording pose extraction.
 enum SessionStage {
-  framingCheck,
-  calibratingStanding,
+  readyToRecord,
+  countdown,
   recordingActive,
-  fallGuardActive,
-  emergencyDispatched,
-  postSessionAnalyzing,
+  reviewRecorded,
+  analyzingVideo,
   summaryReady,
 }

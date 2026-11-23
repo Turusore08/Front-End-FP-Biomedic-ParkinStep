@@ -6,6 +6,7 @@ import '../application/controllers/pre_flight_coordinator.dart';
 import '../application/controllers/pre_flight_ui_state.dart';
 import '../application/ports/cueing_port.dart';
 import '../domain/enums/medication_state.dart';
+import '../domain/enums/session_protocol.dart';
 import '../infrastructure/cueing/system_cueing_adapter.dart';
 
 final cueingPortProvider = Provider<CueingPort>(
@@ -24,6 +25,9 @@ class PreFlightController extends Notifier<PreFlightUiState> {
     );
     return const PreFlightUiState();
   }
+
+  void selectProtocol(SessionProtocol protocol) =>
+      _coordinator.selectProtocol(protocol);
 
   void toggleFloorSafe() => _coordinator.toggleFloorSafe();
 

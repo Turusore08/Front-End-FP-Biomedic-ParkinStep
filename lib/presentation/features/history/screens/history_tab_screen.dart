@@ -134,7 +134,7 @@ class _HistoryTabScreenState extends ConsumerState<HistoryTabScreen> {
               const SizedBox(height: 22),
 
               Text(
-                'Sesi Skrining 360°',
+                'Riwayat Sesi Skrining',
                 style: AppTypography.cardTitle(size: 18),
               ),
               const SizedBox(height: 10),
@@ -144,7 +144,7 @@ class _HistoryTabScreenState extends ConsumerState<HistoryTabScreen> {
                   title: ClinicalCopy.emptyHistoryTitle,
                   description: ClinicalCopy.emptyHistoryBody,
                   ctaLabel: ClinicalCopy.emptyHistoryCta,
-                  onCtaPressed: () => context.push('/pre-flight'),
+                  onCtaPressed: () => context.push('/select-test'),
                 )
               else
                 Column(
@@ -187,7 +187,7 @@ class _HistoryTabScreenState extends ConsumerState<HistoryTabScreen> {
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            '${_formatLocalTimestamp(session.startedAtUtc)} · ${session.episodeCount} Episode',
+                                            '${session.protocol.shortLabelId} · ${_formatLocalTimestamp(session.startedAtUtc)} · ${session.episodeCount} Episode',
                                             style: AppTypography.captionBadge(
                                               color: AppColors.mutedSlate,
                                               weight: FontWeight.w500,

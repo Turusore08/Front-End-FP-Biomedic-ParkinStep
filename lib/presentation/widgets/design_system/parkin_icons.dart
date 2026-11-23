@@ -261,6 +261,75 @@ abstract final class ParkinIcons {
     );
   }
 
+  /// Bespoke medical line-art illustration: bi-directional straight walking gait test.
+  static Widget walkBackForthIllustration({double size = 50}) {
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M14 21H50" stroke="#00A9EC" stroke-width="2.6" stroke-linecap="round"/>'
+      '<path d="M44 15.5L50 21L44 26.5" stroke="#00A9EC" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<path d="M50 43H14" stroke="#0077B6" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="4 3"/>'
+      '<path d="M20 37.5L14 43L20 48.5" stroke="#0077B6" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<rect x="23" y="27" width="18" height="10" rx="5" fill="#E8F7FC" stroke="#234085" stroke-width="2.4"/>'
+      '<circle cx="28" cy="32" r="2" fill="#234085"/>'
+      '<circle cx="36" cy="32" r="2" fill="#0077B6"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  /// Bespoke medical line-art illustration: sit-to-stand chair transition test.
+  static Widget sitToStandIllustration({double size = 50}) {
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M19 20V37H37" stroke="#234085" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<path d="M19 37V49" stroke="#234085" stroke-width="2.8" stroke-linecap="round"/>'
+      '<path d="M37 37V49" stroke="#234085" stroke-width="2.8" stroke-linecap="round"/>'
+      '<path d="M19 28H31" stroke="#0077B6" stroke-width="2.4" stroke-linecap="round"/>'
+      '<path d="M46 46V18" stroke="#00A9EC" stroke-width="2.8" stroke-linecap="round"/>'
+      '<path d="M40.5 23.5L46 17.5L51.5 23.5" stroke="#00A9EC" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+      '<circle cx="46" cy="49" r="3" fill="#E8F7FC" stroke="#234085" stroke-width="2"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget sendArrow({
+    Color color = const Color(0xFF0077B6),
+    double size = 20,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M4 12L20 4L14 20L11 13L4 12Z" stroke="$hex" stroke-width="2.1" stroke-linejoin="round"/>'
+      '<path d="M11 13L20 4" stroke="$hex" stroke-width="2.1" stroke-linecap="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
+  static Widget retakeArrow({
+    Color color = const Color(0xFF006299),
+    double size = 20,
+  }) {
+    final hex = _toHex(color);
+    return SvgPicture.string(
+      '<svg width="$size" height="$size" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      '<path d="M4.5 12C4.5 7.9 7.9 4.5 12 4.5C15.1 4.5 17.8 6.4 18.9 9.2" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '<path d="M19.5 12C19.5 16.1 16.1 19.5 12 19.5C8.9 19.5 6.2 17.6 5.1 14.8" stroke="$hex" stroke-width="2.2" stroke-linecap="round"/>'
+      '<path d="M15.8 9.4H19.4V5.8" stroke="$hex" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+      '</svg>',
+      width: size,
+      height: size,
+      excludeFromSemantics: true,
+    );
+  }
+
   /// Bespoke medical line-art illustration 2: acoustic metronome + rhythmic audio arcs.
   static Widget cueingRasIllustration({double size = 50}) {
     return SvgPicture.string(

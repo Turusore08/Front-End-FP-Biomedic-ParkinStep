@@ -10,6 +10,7 @@ import '../../domain/entities/session_clinical_report.dart';
 import '../../domain/entities/session_summary_item.dart';
 import '../../domain/entities/window_prediction_item.dart';
 import '../../domain/enums/medication_state.dart';
+import '../../domain/enums/session_protocol.dart';
 import '../../domain/enums/session_sync_status.dart';
 import '../../domain/errors/dashboard_failure.dart';
 
@@ -169,6 +170,7 @@ class LocalHomeDashboardRepository implements HomeDashboardRepositoryPort {
       'summary': <String, Object?>{
         'session_id': s.sessionId,
         'started_at_utc': s.startedAtUtc.toUtc().toIso8601String(),
+        'protocol': s.protocol.storageValue,
         'med_state': s.medState.storageValue,
         'fog_percentage': s.fogPercentage,
         'episode_count': s.episodeCount,
@@ -322,6 +324,7 @@ class LocalHomeDashboardRepository implements HomeDashboardRepositoryPort {
               (s) => <String, Object?>{
                 'session_id': s.sessionId,
                 'started_at_utc': s.startedAtUtc.toUtc().toIso8601String(),
+                'protocol': s.protocol.storageValue,
                 'med_state': s.medState.storageValue,
                 'fog_percentage': s.fogPercentage,
                 'episode_count': s.episodeCount,
@@ -375,6 +378,9 @@ class LocalHomeDashboardRepository implements HomeDashboardRepositoryPort {
         SessionSummaryItem(
           sessionId: id,
           startedAtUtc: startedAt,
+          protocol: SessionProtocol.fromStorageValue(
+            entry['protocol'] is String ? entry['protocol']! as String : null,
+          ),
           medState: MedicationState.fromStorageValue(
             entry['med_state'] is String ? entry['med_state']! as String : null,
           ),

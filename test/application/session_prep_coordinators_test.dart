@@ -7,6 +7,7 @@ import 'package:parkinstep/application/controllers/pre_flight_coordinator.dart';
 import 'package:parkinstep/application/controllers/pre_flight_ui_state.dart';
 import 'package:parkinstep/application/ports/cueing_port.dart';
 import 'package:parkinstep/domain/enums/medication_state.dart';
+import 'package:parkinstep/domain/enums/session_protocol.dart';
 
 class _SpyCueingPort implements CueingPort {
   final List<({bool accented, bool sound, bool haptic})> beats = [];
@@ -89,6 +90,10 @@ void main() {
       expect(coordinator.confirmReady(), isTrue);
       expect(state.isConfirmed, isTrue);
       expect(state.confirmedAtUtc, fixedUtc);
+
+      coordinator.selectProtocol(SessionProtocol.walkBackAndForth);
+      expect(state.checklist.protocol, SessionProtocol.walkBackAndForth);
+      expect(state.isConfirmed, isFalse);
 
       coordinator.reset();
       expect(state.checklist.completedCount, 0);

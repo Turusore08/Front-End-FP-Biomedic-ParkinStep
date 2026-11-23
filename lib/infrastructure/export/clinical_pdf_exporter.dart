@@ -126,7 +126,7 @@ class ClinicalPdfExporter {
                       ),
                     ),
                     pw.Text(
-                      'Pasien: ${report.patientDisplayName} · Status Obat: ${s.medState.labelId}',
+                      'Pasien: ${report.patientDisplayName} · ${s.protocol.titleId} · Obat: ${s.medState.labelId}',
                       style: const pw.TextStyle(fontSize: 9, color: _mutedSlate),
                     ),
                     pw.Text(

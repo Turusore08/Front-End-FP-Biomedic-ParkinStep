@@ -34,9 +34,9 @@ class _PreFlightChecklistScreenState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       // Load the pose/FoG models while the patient works through the
-      // checklist, so "Lanjut ke Kamera" opens the camera without a stall.
+      // checklist, so post-recording pose extraction runs without a stall.
       unawaited(
-        ref.read(edgeInferencePortProvider).warmUp().catchError((Object _) {}),
+        ref.read(videoSessionPortProvider).warmUp().catchError((Object _) {}),
       );
       final latestLog =
           ref.read(homeDashboardControllerProvider).summary.latestMedicationLog;
@@ -144,7 +144,7 @@ class _PreFlightChecklistScreenState
                             onTap: () => ref
                                 .read(onboardingControllerProvider.notifier)
                                 .toggleVoiceGuide(
-                                  ClinicalCopy.preflightVoiceGuide,
+                                  checklist.protocol.preflightVoiceGuideId,
                                 ),
                             child: Center(
                               child: Container(
@@ -173,13 +173,55 @@ class _PreFlightChecklistScreenState
                 ),
                 const SizedBox(height: 10),
 
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.iceSurface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.skyCard),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${checklist.protocol.titleId} · 2 Menit',
+                          style: AppTypography.captionBadge(
+                            color: AppColors.onIceAzure,
+                            weight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          minWidth: 56,
+                          minHeight: 56,
+                        ),
+                        child: TextButton(
+                          key: const Key('preflight_change_test_button'),
+                          onPressed: _navigateBack,
+                          child: Text(
+                            'Ganti',
+                            style: AppTypography.buttonLabel(
+                              color: AppColors.clinicalAzure,
+                              size: 14.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Text(
                   ClinicalCopy.preflightTitle,
                   style: AppTypography.screenTitle(size: 24),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  ClinicalCopy.preflightSubtitle,
+                  checklist.protocol.preflightSubtitleId,
                   style: AppTypography.bodyLarge(size: 14.5),
                 ),
                 const SizedBox(height: 18),
@@ -199,8 +241,8 @@ class _PreFlightChecklistScreenState
                 const SizedBox(height: 12),
                 ParkinStackedMenuTile(
                   key: const Key('checklist_space_tile'),
-                  title: ClinicalCopy.preflightSpaceTitle,
-                  subtitle: ClinicalCopy.preflightSpaceDesc,
+                  title: checklist.protocol.spaceChecklistTitleId,
+                  subtitle: checklist.protocol.spaceChecklistDescId,
                   leadingIcon: ParkinIcons.radiusSpace(
                     color: AppColors.clinicalAzure,
                   ),
@@ -213,7 +255,7 @@ class _PreFlightChecklistScreenState
                 ParkinStackedMenuTile(
                   key: const Key('checklist_support_tile'),
                   title: ClinicalCopy.preflightSupportTitle,
-                  subtitle: ClinicalCopy.preflightSupportDesc,
+                  subtitle: checklist.protocol.supportChecklistDescId,
                   leadingIcon: ParkinIcons.chairSupport(
                     color: AppColors.clinicalAzure,
                   ),

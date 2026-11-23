@@ -242,7 +242,7 @@ components:
       enum: [LIVE_CAUSAL, POST_SESSION_EXACT, CLOUD_FALLBACK]
     SessionProtocol:
       type: string
-      enum: [TURNING_360_2MIN, FREE_WALK_MONITORING]
+      enum: [TURNING_360_2MIN, WALK_BACK_AND_FORTH_2MIN, SIT_TO_STAND_2MIN, FREE_WALK_MONITORING]
     ClassifierName:
       type: string
       enum: [LIGHTGBM_FFT, LIGHT_STGCN, PURE_BIMAMBA]

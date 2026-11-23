@@ -6,12 +6,10 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../../application/controllers/clinical_session_ui_state.dart';
-import '../../../../application/state_machines/clinical_session_fsm.dart';
 import '../../../../di/clinical_session_providers.dart';
 import '../../../../di/dashboard_providers.dart';
 import '../../../../di/session_prep_providers.dart';
 import '../../../../domain/constants/clinical_copy.dart';
-import '../../../../domain/enums/alert_tier.dart';
 import '../../../../domain/enums/preview_gait_scenario.dart';
 import '../../../../domain/enums/session_stage.dart';
 import '../../../theme/app_colors.dart';
@@ -22,12 +20,15 @@ import '../../../widgets/design_system/parkin_primary_pill_button.dart';
 import '../../../widgets/design_system/parkin_progress_pill.dart';
 import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
 import '../../../widgets/design_system/parkin_state_cards.dart';
-import '../painters/skeleton_hud_painter.dart';
 import '../widgets/live_camera_backdrop.dart';
 
-/// Unified live screening flow hosting S-05 (Framing & Calibration),
-/// S-06 (60 FPS Live Skeleton HUD + Two-Tier Cueing), S-08 (10s Fall Guard),
-/// R-27 State/LoadingDSP, State/ErrorLowLight, and immediate Session Summary.
+/// Unified video-based screening flow hosting:
+/// - `readyToRecord`: clean camera framing + test guidance (NO live skeleton)
+/// - `countdown`: 3-2-1 start preparation
+/// - `recordingActive`: 2-minute guided video recording with timed text/voice cues
+/// - `reviewRecorded`: confirmation to Retake ("Ulangi Rekaman") or Submit ("Kirim")
+/// - `analyzingVideo`: post-recording 15 Hz YOLO pose extraction + LightGBM + video wipe
+/// - `summaryReady`: completion summary with link to S-09 report
 class LiveSessionScreen extends ConsumerStatefulWidget {
   const LiveSessionScreen({super.key});
 
@@ -47,8 +48,13 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final medState = ref.read(preFlightControllerProvider).checklist.medState;
-      unawaited(_controller.startSession(medState: medState));
+      final checklist = ref.read(preFlightControllerProvider).checklist;
+      unawaited(
+        _controller.startSession(
+          protocol: checklist.protocol,
+          medState: checklist.medState,
+        ),
+      );
     });
   }
 
@@ -66,7 +72,7 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen>
     super.dispose();
   }
 
-  void _exitToHomeOrPop() {
+  void _exitToPreviousOrHome() {
     _controller.cancelTimersAndStreamsOnly();
     if (!mounted) return;
     if (context.canPop()) {
@@ -83,7 +89,9 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen>
       (prev, next) {
         if (next == SessionStage.summaryReady &&
             prev != SessionStage.summaryReady) {
-          unawaited(ref.read(homeDashboardControllerProvider.notifier).initialize());
+          unawaited(
+            ref.read(homeDashboardControllerProvider.notifier).initialize(),
+          );
         }
       },
     );
@@ -94,53 +102,56 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen>
     if (uiState.isPausedByLifecycle) {
       return _PausedSessionView(
         onRestart: () {
-          unawaited(_controller.startSession(medState: fsm.medState));
+          unawaited(
+            _controller.startSession(
+              protocol: fsm.protocol,
+              medState: fsm.medState,
+            ),
+          );
         },
         onExit: () => context.go('/home'),
       );
     }
 
     switch (fsm.stage) {
-      case SessionStage.framingCheck:
-      case SessionStage.calibratingStanding:
-        return _FramingAndCalibrationView(
+      case SessionStage.readyToRecord:
+        return _ReadyToRecordView(
           uiState: uiState,
-          onCancel: _exitToHomeOrPop,
-          onRetryCalibration: _controller.retryCalibration,
+          onCancel: _exitToPreviousOrHome,
+          onToggleSound: _controller.toggleSound,
+          onStartCountdown: _controller.startCountdown,
           onScenarioSelected: _controller.setPreviewScenario,
+          onRetryOpenCamera: () {
+            unawaited(
+              _controller.startSession(
+                protocol: fsm.protocol,
+                medState: fsm.medState,
+              ),
+            );
+          },
+        );
+      case SessionStage.countdown:
+        return _CountdownView(
+          uiState: uiState,
+          onCancelCountdown: _controller.stopRecording,
         );
       case SessionStage.recordingActive:
-        return _LiveRecordingHudView(
+        return _VideoRecordingView(
           uiState: uiState,
-          onFinishTest: _controller.finishSessionEarly,
+          onStopRecording: _controller.stopRecording,
+          onToggleSound: _controller.toggleSound,
           onScenarioSelected: _controller.setPreviewScenario,
         );
-      case SessionStage.fallGuardActive:
-      case SessionStage.emergencyDispatched:
-        return _FallGuardView(
+      case SessionStage.reviewRecorded:
+        return _ReviewRecordedView(
           uiState: uiState,
-          onCancelFallGuard: _controller.cancelFallGuard,
-          onTriggerEmergencyNow: _controller.triggerEmergencyNow,
-          onFinishAfterEmergency: _controller.finishSessionEarly,
+          onSubmitVideo: () => unawaited(_controller.submitVideoForAnalysis()),
+          onRetake: () => unawaited(_controller.retakeRecording()),
         );
-      case SessionStage.postSessionAnalyzing:
-        return const AnnotatedRegion<SystemUiOverlayStyle>(
-          value: SystemUiOverlayStyle.light,
-          child: Scaffold(
-            backgroundColor: AppColors.midnightNavy,
-            body: SafeArea(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.all(20),
-                  child: ParkinLoadingDspCard(
-                    key: Key('loading_dsp_card'),
-                    title: ClinicalCopy.loadingDspTitle,
-                    description: ClinicalCopy.loadingDspBody,
-                  ),
-                ),
-              ),
-            ),
-          ),
+      case SessionStage.analyzingVideo:
+        return _AnalyzingVideoView(
+          uiState: uiState,
+          onCancelAnalysis: () => unawaited(_controller.cancelAnalysis()),
         );
       case SessionStage.summaryReady:
         return _PostSessionSummaryView(
@@ -154,25 +165,27 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen>
   }
 }
 
-class _FramingAndCalibrationView extends StatelessWidget {
-  const _FramingAndCalibrationView({
+class _ReadyToRecordView extends StatelessWidget {
+  const _ReadyToRecordView({
     required this.uiState,
     required this.onCancel,
-    required this.onRetryCalibration,
+    required this.onToggleSound,
+    required this.onStartCountdown,
     required this.onScenarioSelected,
+    required this.onRetryOpenCamera,
   });
 
   final ClinicalSessionUiState uiState;
   final VoidCallback onCancel;
-  final VoidCallback onRetryCalibration;
+  final VoidCallback onToggleSound;
+  final VoidCallback onStartCountdown;
   final ValueChanged<PreviewGaitScenario> onScenarioSelected;
+  final VoidCallback onRetryOpenCamera;
 
   @override
   Widget build(BuildContext context) {
     final fsm = uiState.fsm;
-    final frame = fsm.latestFrame;
-    final confPct = ((frame?.lb6AvgConf ?? 0.0) * 100).round();
-    final isCalibrating = fsm.stage == SessionStage.calibratingStanding;
+    final hasError = uiState.errorMessage != null;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -182,30 +195,17 @@ class _FramingAndCalibrationView extends StatelessWidget {
           child: Stack(
             children: [
               const Positioned.fill(child: LiveCameraBackdrop()),
-              // 60 FPS Live Skeleton Overlay + Alignment Reticle
-              Positioned.fill(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    painter: SkeletonHudPainter(
-                      frame: frame,
-                      alertTier: fsm.alertTier,
-                    ),
-                  ),
-                ),
-              ),
               Positioned.fill(
                 child: IgnorePointer(
                   child: Center(
                     child: Container(
-                      width: 210,
-                      height: 310,
+                      width: 200,
+                      height: 290,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                          color: isCalibrating
-                              ? AppColors.normalEmerald
-                              : AppColors.rhythmAqua,
-                          width: 2.5,
+                          color: AppColors.skyCard.withValues(alpha: 0.7),
+                          width: 2.0,
                         ),
                       ),
                     ),
@@ -225,145 +225,76 @@ class _FramingAndCalibrationView extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Top HUD Controls & LB6 Confidence Badge
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Flexible(
-                                  child: Semantics(
-                                    button: true,
-                                    label: 'Batalkan sesi skrining',
-                                    child: ConstrainedBox(
-                                      constraints:
-                                          const BoxConstraints(minHeight: 56),
-                                      child: Material(
-                                        color: AppColors.darkElevated,
-                                        borderRadius: BorderRadius.circular(14),
-                                        child: InkWell(
-                                          key: const Key('live_cancel_button'),
-                                          onTap: onCancel,
-                                          borderRadius:
-                                              BorderRadius.circular(14),
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                            child: FittedBox(
-                                              fit: BoxFit.scaleDown,
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  ParkinIcons.arrowBack(
-                                                    color: AppColors.pureWhite,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    'Batal',
-                                                    style:
-                                                        AppTypography.buttonLabel(
-                                                      color: AppColors.pureWhite,
-                                                      size: 15.0,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: confPct >= 20
-                                          ? AppColors.emeraldSoftBg
-                                          : AppColors.amberSoftBg,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        'Sendi LB6 $confPct%',
-                                        style: AppTypography.captionBadge(
-                                          color: confPct >= 20
-                                              ? AppColors.emeraldDarkText
-                                              : AppColors.amberDarkText,
-                                          weight: FontWeight.w700,
-                                          tabular: true,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            _TopCameraToolbar(
+                              cancelKey: const Key('live_cancel_button'),
+                              protocolLabel: fsm.protocol.shortLabelId,
+                              soundEnabled: fsm.soundEnabled,
+                              onCancel: onCancel,
+                              onToggleSound: onToggleSound,
                             ),
-
                             if (uiState.isPreviewSimulation) ...[
                               const SizedBox(height: 10),
                               _PreviewScenarioBar(
                                 scenarios: const <PreviewGaitScenario>[
                                   PreviewGaitScenario.normalGait,
-                                  PreviewGaitScenario.lowLightOcclusion,
                                   PreviewGaitScenario.confirmedFog,
                                 ],
                                 onSelected: onScenarioSelected,
                               ),
                             ],
-
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
                             const Expanded(child: SizedBox.shrink()),
-
-                            if (fsm.showLowLightError)
+                            if (hasError)
                               ParkinErrorLowLightCard(
-                                key: const Key('low_light_error_card'),
-                                retryKey: const Key('low_light_retry_button'),
+                                key: const Key('session_error_card'),
+                                retryKey: const Key('session_error_retry_button'),
                                 title: ClinicalCopy.errorLowLightTitle,
-                                description: ClinicalCopy.errorLowLightBody,
+                                description: uiState.errorMessage!,
                                 ctaLabel: ClinicalCopy.errorLowLightCta,
-                                onRetry: onRetryCalibration,
+                                onRetry: onRetryOpenCamera,
                               )
                             else
                               Container(
-                                key: const Key('calibration_status_card'),
+                                key: const Key('record_ready_card'),
                                 padding: const EdgeInsets.all(18),
                                 decoration: BoxDecoration(
                                   color: AppColors.darkElevated,
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
-                                    color: isCalibrating
-                                        ? AppColors.normalEmerald
-                                        : AppColors.subtleBorderDark,
+                                    color: AppColors.subtleBorderDark,
                                   ),
                                 ),
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
                                     Text(
-                                      isCalibrating
-                                          ? '${ClinicalCopy.calibratingTitle} (${fsm.calibrationRemainingSec} dtk)'
-                                          : ClinicalCopy.framingTitle,
+                                      fsm.protocol.titleId,
                                       style: AppTypography.cardTitle(
                                         color: AppColors.pureWhite,
-                                        size: 18,
+                                        size: 18.5,
                                       ),
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
-                                      isCalibrating
-                                          ? ClinicalCopy.calibratingBody
-                                          : ClinicalCopy.framingBody,
+                                      uiState.isOpeningCamera
+                                          ? 'Membuka kamera belakang...'
+                                          : fsm.protocol.readyInstructionId,
                                       style: AppTypography.bodyLarge(
                                         color: AppColors.darkMuted,
                                         size: 14.5,
                                       ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    ParkinPrimaryPillButton(
+                                      key: const Key('record_start_button'),
+                                      label: 'Mulai Rekam (2 Menit)',
+                                      leadingIcon: ParkinIcons.playTriangle(
+                                        color: AppColors.clinicalAzure,
+                                      ),
+                                      isLoading: uiState.isOpeningCamera,
+                                      onPressed: uiState.isOpeningCamera
+                                          ? null
+                                          : onStartCountdown,
                                     ),
                                   ],
                                 ),
@@ -383,84 +314,135 @@ class _FramingAndCalibrationView extends StatelessWidget {
   }
 }
 
-/// S-06 full-screen camera HUD. The live preview fills the screen; FoG risk
-/// sits on the right edge, session progress at the top centre, and the
-/// control panel (prompt, finish button) slides in only when requested.
-class _LiveRecordingHudView extends StatefulWidget {
-  const _LiveRecordingHudView({
+class _CountdownView extends StatelessWidget {
+  const _CountdownView({
     required this.uiState,
-    required this.onFinishTest,
+    required this.onCancelCountdown,
+  });
+
+  final ClinicalSessionUiState uiState;
+  final VoidCallback onCancelCountdown;
+
+  @override
+  Widget build(BuildContext context) {
+    final fsm = uiState.fsm;
+    final cue = fsm.effectiveCue;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        key: const Key('recording_countdown_screen'),
+        backgroundColor: AppColors.midnightNavy,
+        body: Stack(
+          children: [
+            const Positioned.fill(child: LiveCameraBackdrop()),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppColors.midnightNavy.withValues(alpha: 0.72),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight:
+                            (constraints.maxHeight - 32).clamp(0.0, 4000.0),
+                      ),
+                      child: IntrinsicHeight(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                _CompactCancelButton(
+                                  buttonKey:
+                                      const Key('countdown_cancel_button'),
+                                  label: 'Batalkan',
+                                  onPressed: onCancelCountdown,
+                                ),
+                              ],
+                            ),
+                            const Expanded(child: SizedBox.shrink()),
+                            Center(
+                              child: Semantics(
+                                liveRegion: true,
+                                label:
+                                    'Mulai merekam dalam ${fsm.countdownRemainingSec} detik',
+                                child: Container(
+                                  width: 156,
+                                  height: 156,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.clinicalAzure,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: AppColors.rhythmAqua,
+                                      width: 4,
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    '${fsm.countdownRemainingSec}',
+                                    key: const Key('countdown_number_text'),
+                                    style: AppTypography.displayTimer(
+                                      color: AppColors.pureWhite,
+                                      size: 56,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'Bersiap: ${fsm.protocol.titleId}',
+                              textAlign: TextAlign.center,
+                              style: AppTypography.screenTitle(
+                                color: AppColors.pureWhite,
+                                size: 22,
+                              ),
+                            ),
+                            const Expanded(child: SizedBox.shrink()),
+                            ParkinHighlightPrompt(
+                              key: const Key('countdown_preview_prompt'),
+                              highlightWord: cue.highlightWord,
+                              instructionTail: cue.instructionTail,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoRecordingView extends StatelessWidget {
+  const _VideoRecordingView({
+    required this.uiState,
+    required this.onStopRecording,
+    required this.onToggleSound,
     required this.onScenarioSelected,
   });
 
   final ClinicalSessionUiState uiState;
-  final VoidCallback onFinishTest;
+  final VoidCallback onStopRecording;
+  final VoidCallback onToggleSound;
   final ValueChanged<PreviewGaitScenario> onScenarioSelected;
 
   @override
-  State<_LiveRecordingHudView> createState() => _LiveRecordingHudViewState();
-}
-
-class _LiveRecordingHudViewState extends State<_LiveRecordingHudView> {
-  bool _panelOpen = false;
-
-  static const List<Shadow> _overlayTextShadow = <Shadow>[
-    Shadow(color: Color(0xCC000000), blurRadius: 6),
-    Shadow(color: Color(0x99000000), blurRadius: 2, offset: Offset(0, 1)),
-  ];
-
-  @override
   Widget build(BuildContext context) {
-    final uiState = widget.uiState;
     final fsm = uiState.fsm;
-    final frame = fsm.latestFrame;
-
-    final (badgeBg, badgeFg) = switch (fsm.alertTier) {
-      AlertTier.gaitNormal => (
-        AppColors.emeraldSoftBg,
-        AppColors.emeraldDarkText,
-      ),
-      AlertTier.earlyWarning => (
-        AppColors.amberSoftBg,
-        AppColors.amberDarkText,
-      ),
-      AlertTier.fogConfirmed => (AppColors.alertRed, AppColors.pureWhite),
-      AlertTier.fallGuard => (AppColors.alertRed, AppColors.pureWhite),
-    };
-
-    final (promptWord, promptTail) = switch (fsm.alertTier) {
-      AlertTier.gaitNormal => (
-        ClinicalCopy.livePromptNormalHighlight,
-        ClinicalCopy.livePromptNormalTail,
-      ),
-      AlertTier.earlyWarning => (
-        ClinicalCopy.livePromptWarningHighlight,
-        ClinicalCopy.livePromptWarningTail,
-      ),
-      AlertTier.fogConfirmed || AlertTier.fallGuard => (
-        ClinicalCopy.livePromptFogHighlight,
-        ClinicalCopy.livePromptFogTail,
-      ),
-    };
-
-    final riskColor = switch (fsm.alertTier) {
-      AlertTier.gaitNormal => AppColors.normalEmerald,
-      AlertTier.earlyWarning => AppColors.warningAmber,
-      AlertTier.fogConfirmed || AlertTier.fallGuard => AppColors.alertRed,
-    };
-    final riskPct = ((frame?.calibratedRiskScore ?? 0.0) * 100)
-        .clamp(0, 100)
-        .round();
-
-    final prompt = ParkinHighlightPrompt(
-      key: const Key('live_highlight_prompt'),
-      highlightWord: promptWord,
-      instructionTail: promptTail,
-    );
-    // Cue instructions matter clinically: keep them on screen during a
-    // warning/FoG even while the control panel is collapsed.
-    final showFloatingPrompt =
-        !_panelOpen && fsm.alertTier != AlertTier.gaitNormal;
+    final cue = fsm.effectiveCue;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -469,274 +451,288 @@ class _LiveRecordingHudViewState extends State<_LiveRecordingHudView> {
         body: Stack(
           children: [
             const Positioned.fill(child: LiveCameraBackdrop()),
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: SkeletonHudPainter(
-                    frame: frame,
-                    alertTier: fsm.alertTier,
-                  ),
-                ),
-              ),
-            ),
             SafeArea(
-              child: Stack(
-                children: [
-                  // Alert tier badge (top-left)
-                  Positioned(
-                    top: 12,
-                    left: 16,
-                    child: Container(
-                      key: const Key('live_alert_badge'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight:
+                            (constraints.maxHeight - 32).clamp(0.0, 4000.0),
                       ),
-                      decoration: BoxDecoration(
-                        color: badgeBg,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        fsm.alertTier.badgeLabelId,
-                        style: AppTypography.captionBadge(
-                          color: badgeFg,
-                          weight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Session progress (top-centre)
-                  Align(
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 52),
-                      child: _LiveProgressOverlay(
-                        key: const Key('live_progress_pill'),
-                        elapsedSeconds: fsm.elapsedSec,
-                        totalSeconds: ClinicalSessionFsm.sessionDurationSec,
-                      ),
-                    ),
-                  ),
-
-                  // FoG risk percentage (right edge, transparent background)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: Semantics(
-                        key: const Key('live_risk_gauge'),
-                        label: 'Skor risiko FoG $riskPct persen',
-                        excludeSemantics: true,
+                      child: IntrinsicHeight(
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
-                              '$riskPct%',
-                              style: AppTypography.displayTimer(
-                                color: riskColor,
-                                size: 44,
-                              ).copyWith(shadows: _overlayTextShadow),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      key: const Key('recording_rec_badge'),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.alertRed,
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                      ),
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              width: 8,
+                                              height: 8,
+                                              decoration: const BoxDecoration(
+                                                color: AppColors.pureWhite,
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'REC · ${fsm.protocol.shortLabelId}',
+                                              style: AppTypography.captionBadge(
+                                                color: AppColors.pureWhite,
+                                                weight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                _SoundIconButton(
+                                  enabled: fsm.soundEnabled,
+                                  onPressed: onToggleSound,
+                                ),
+                              ],
                             ),
-                            Text(
-                              'Risiko FoG',
-                              style: AppTypography.captionBadge(
-                                color: AppColors.pureWhite,
-                                weight: FontWeight.w700,
-                              ).copyWith(shadows: _overlayTextShadow),
+                            const SizedBox(height: 10),
+                            Center(
+                              child: _RecordingProgressOverlay(
+                                key: const Key('live_progress_pill'),
+                                elapsedSeconds: fsm.elapsedSec,
+                                totalSeconds: fsm.protocol.durationSec,
+                              ),
+                            ),
+                            if (uiState.isPreviewSimulation) ...[
+                              const SizedBox(height: 10),
+                              _PreviewScenarioBar(
+                                scenarios: const <PreviewGaitScenario>[
+                                  PreviewGaitScenario.normalGait,
+                                  PreviewGaitScenario.confirmedFog,
+                                ],
+                                onSelected: onScenarioSelected,
+                              ),
+                            ],
+                            const Expanded(child: SizedBox(height: 14)),
+                            ParkinHighlightPrompt(
+                              key: const Key('live_highlight_prompt'),
+                              highlightWord: cue.highlightWord,
+                              instructionTail: cue.instructionTail,
+                            ),
+                            const SizedBox(height: 14),
+                            ParkinPrimaryPillButton(
+                              key: const Key('record_stop_button'),
+                              label: 'Selesai Rekam',
+                              backgroundColor: AppColors.alertRed,
+                              leadingIcon: ParkinIcons.stopSquare(
+                                color: AppColors.alertRed,
+                              ),
+                              onPressed: onStopRecording,
                             ),
                           ],
                         ),
                       ),
                     ),
-                  ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-                  // Bottom: warnings, floating cue, panel toggle + panel
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (frame?.isLowQualityWindow ?? false)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.amberSoftBg.withValues(
-                                  alpha: 0.92,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                'Kaki kurang terlihat, cek pencahayaan atau jarak kamera.',
-                                style: AppTypography.captionBadge(
-                                  color: AppColors.amberDarkText,
-                                  weight: FontWeight.w700,
-                                ),
+class _ReviewRecordedView extends StatelessWidget {
+  const _ReviewRecordedView({
+    required this.uiState,
+    required this.onSubmitVideo,
+    required this.onRetake,
+  });
+
+  final ClinicalSessionUiState uiState;
+  final VoidCallback onSubmitVideo;
+  final VoidCallback onRetake;
+
+  @override
+  Widget build(BuildContext context) {
+    final fsm = uiState.fsm;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        key: const Key('review_recorded_screen'),
+        backgroundColor: AppColors.slateCanvas,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  ClinicalCopy.reviewRecordedTitle,
+                  style: AppTypography.screenTitle(size: 24),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Periksa ringkasan rekaman sebelum mengirimnya ke Pose Extractor lokal.',
+                  style: AppTypography.bodyLarge(size: 14.5),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  key: const Key('review_recorded_card'),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.pureWhite,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.subtleBorderLight),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.iceSurface,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          fsm.protocol.titleId,
+                          style: AppTypography.captionBadge(
+                            color: AppColors.onIceAzure,
+                            weight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Durasi Rekaman: ${fsm.recordedDurationSec} detik',
+                        style: AppTypography.heroMetric(size: 24),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Status Obat: ${fsm.medState.labelId}',
+                        style: AppTypography.bodyLarge(size: 15),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ParkinIcons.offlineShield(
+                            color: AppColors.emeraldDarkText,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              ClinicalCopy.reviewPrivacyGuarantee,
+                              style: AppTypography.captionBadge(
+                                color: AppColors.emeraldDarkText,
+                                weight: FontWeight.w600,
                               ),
                             ),
                           ),
-                        if (showFloatingPrompt)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                            child: prompt,
-                          ),
-                        Center(
-                          child: _PanelToggleButton(
-                            open: _panelOpen,
-                            onPressed: () =>
-                                setState(() => _panelOpen = !_panelOpen),
-                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (!fsm.canSubmitVideo) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    key: const Key('short_video_warning'),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.amberSoftBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.amberSoftBorder),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ParkinIcons.alertTriangle(
+                          color: AppColors.warningAmberText,
                         ),
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          alignment: Alignment.topCenter,
-                          child: _panelOpen
-                              ? _buildPanel(prompt)
-                              : const SizedBox(width: double.infinity),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            ClinicalCopy.reviewShortVideoWarning,
+                            style: AppTypography.captionBadge(
+                              color: AppColors.amberDarkText,
+                              weight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPanel(Widget prompt) {
-    return Container(
-      key: const Key('live_control_panel'),
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-      decoration: const BoxDecoration(
-        color: AppColors.darkElevated,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          prompt,
-          if (widget.uiState.isPreviewSimulation) ...[
-            const SizedBox(height: 14),
-            _PreviewScenarioBar(
-              scenarios: const <PreviewGaitScenario>[
-                PreviewGaitScenario.normalGait,
-                PreviewGaitScenario.confirmedFog,
-                PreviewGaitScenario.suddenFall,
-              ],
-              onSelected: widget.onScenarioSelected,
-            ),
-          ],
-          const SizedBox(height: 18),
-          ParkinPrimaryPillButton(
-            key: const Key('live_finish_test_button'),
-            label: 'Selesaikan Tes',
-            backgroundColor: AppColors.alertRed,
-            leadingIcon: ParkinIcons.stopSquare(color: AppColors.alertRed),
-            onPressed: widget.onFinishTest,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Compact elapsed/total timer with a thin aqua progress track, drawn over
-/// the camera feed.
-class _LiveProgressOverlay extends StatelessWidget {
-  const _LiveProgressOverlay({
-    super.key,
-    required this.elapsedSeconds,
-    required this.totalSeconds,
-  });
-
-  final int elapsedSeconds;
-  final int totalSeconds;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = totalSeconds <= 0 ? 120 : totalSeconds;
-    final progress = (elapsedSeconds / total).clamp(0.0, 1.0);
-    return Container(
-      width: 168,
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
-      decoration: BoxDecoration(
-        color: AppColors.midnightNavy.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '${ParkinProgressPill.formatDuration(elapsedSeconds)} / '
-            '${ParkinProgressPill.formatDuration(total)}',
-            style: AppTypography.captionBadge(
-              color: AppColors.pureWhite,
-              weight: FontWeight.w700,
-              tabular: true,
-            ),
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 5,
-              color: AppColors.rhythmAqua,
-              backgroundColor: AppColors.pureWhite.withValues(alpha: 0.25),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PanelToggleButton extends StatelessWidget {
-  const _PanelToggleButton({required this.open, required this.onPressed});
-
-  final bool open;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: open ? 'Sembunyikan panel kontrol' : 'Tampilkan panel kontrol',
-      child: Material(
-        key: const Key('live_panel_toggle'),
-        color: AppColors.midnightNavy.withValues(alpha: 0.6),
-        shape: const StadiumBorder(),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: onPressed,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                open
-                    ? ParkinIcons.chevronDown(size: 20)
-                    : ParkinIcons.chevronUp(size: 20),
-                const SizedBox(width: 6),
-                Text(
-                  open ? 'Tutup' : 'Kontrol',
-                  style: AppTypography.captionBadge(
-                    color: AppColors.pureWhite,
-                    weight: FontWeight.w700,
+                if (uiState.errorMessage != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.redSoftBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.alertRed),
+                    ),
+                    child: Text(
+                      uiState.errorMessage!,
+                      style: AppTypography.captionBadge(
+                        color: AppColors.redDarkText,
+                        weight: FontWeight.w700,
+                      ),
+                    ),
                   ),
+                ],
+                const SizedBox(height: 22),
+                ParkinPrimaryPillButton(
+                  key: const Key('record_submit_button'),
+                  label: 'Kirim & Analisis Video',
+                  leadingIcon: ParkinIcons.sendArrow(
+                    color: fsm.canSubmitVideo
+                        ? AppColors.clinicalAzure
+                        : AppColors.mutedSlate,
+                  ),
+                  isLoading: uiState.isFinalizingVideoFile,
+                  onPressed: (fsm.canSubmitVideo && !uiState.isFinalizingVideoFile)
+                      ? onSubmitVideo
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                ParkinSecondaryIceButton(
+                  key: const Key('record_retake_button'),
+                  title: 'Ulangi Rekaman',
+                  subtitle: 'Hapus rekaman ini dan rekam ulang tes',
+                  leadingIcon: ParkinIcons.retakeArrow(
+                    color: AppColors.onIceAzure,
+                  ),
+                  onPressed: onRetake,
                 ),
               ],
             ),
@@ -747,187 +743,57 @@ class _PanelToggleButton extends StatelessWidget {
   }
 }
 
-class _FallGuardView extends StatelessWidget {
-  const _FallGuardView({
+class _AnalyzingVideoView extends StatelessWidget {
+  const _AnalyzingVideoView({
     required this.uiState,
-    required this.onCancelFallGuard,
-    required this.onTriggerEmergencyNow,
-    required this.onFinishAfterEmergency,
+    required this.onCancelAnalysis,
   });
 
   final ClinicalSessionUiState uiState;
-  final VoidCallback onCancelFallGuard;
-  final VoidCallback onTriggerEmergencyNow;
-  final VoidCallback onFinishAfterEmergency;
+  final VoidCallback onCancelAnalysis;
 
   @override
   Widget build(BuildContext context) {
     final fsm = uiState.fsm;
-    final dispatched = fsm.stage == SessionStage.emergencyDispatched;
+    final frameLabel = fsm.analysisTotalFrames > 0
+        ? '${fsm.analysisProcessedFrames} / ${fsm.analysisTotalFrames} frame'
+        : null;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        key: const Key('fall_guard_screen'),
         backgroundColor: AppColors.midnightNavy,
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  ClinicalCopy.fallGuardTopLabel,
-                  textAlign: TextAlign.center,
-                  style: AppTypography.captionBadge(
-                    color: AppColors.darkMuted,
-                    weight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Center(
-                  child: Semantics(
-                    liveRegion: true,
-                    label: dispatched
-                        ? 'Peringatan darurat aktif'
-                        : 'Hitung mundur ${fsm.fallCountdownSec} detik',
-                    child: Container(
-                      width: 176,
-                      height: 176,
-                      decoration: BoxDecoration(
-                        color: AppColors.alertRed.withValues(alpha: 0.24),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Container(
-                        width: 138,
-                        height: 138,
-                        decoration: const BoxDecoration(
-                          color: AppColors.alertRed,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              dispatched ? 'DARURAT' : '${fsm.fallCountdownSec}',
-                              style: AppTypography.displayTimer(
-                                color: AppColors.pureWhite,
-                                size: dispatched ? 24 : 44,
-                              ),
-                            ),
-                            if (!dispatched)
-                              Text(
-                                'detik',
-                                style: AppTypography.captionBadge(
-                                  color: AppColors.pureWhite,
-                                  weight: FontWeight.w700,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  dispatched
-                      ? 'Peringatan Darurat Aktif'
-                      : ClinicalCopy.fallGuardTitle,
-                  textAlign: TextAlign.center,
-                  style: AppTypography.screenTitle(
-                    color: AppColors.pureWhite,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  dispatched
-                      ? 'Sirine lokal dibunyikan dan notifikasi darurat disiapkan untuk caregiver.'
-                      : '${fsm.fallTriggerReason} ${ClinicalCopy.fallGuardBody}',
-                  textAlign: TextAlign.center,
-                  style: AppTypography.bodyLarge(
-                    color: AppColors.darkMuted,
-                    size: 15,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                if (!dispatched) ...[
-                  Semantics(
-                    button: true,
-                    label: 'Batalkan alarm darurat dan lanjutkan skrining',
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 88),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: AppColors.normalEmerald,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(20),
-                          child: InkWell(
-                            key: const Key('fall_guard_im_ok_button'),
-                            onTap: onCancelFallGuard,
-                            borderRadius: BorderRadius.circular(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 16,
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 50,
-                                    height: 50,
-                                    decoration: const BoxDecoration(
-                                      color: AppColors.pureWhite,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: ParkinIcons.check(
-                                      color: AppColors.emeraldDarkText,
-                                      size: 26,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Text(
-                                      ClinicalCopy.fallGuardImOkCta,
-                                      textAlign: TextAlign.center,
-                                      style: AppTypography.buttonLabel(
-                                        color: AppColors.midnightNavy,
-                                        size: 18.5,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ParkinLoadingDspCard(
+                    key: const Key('loading_dsp_card'),
+                    title: ClinicalCopy.loadingDspTitle,
+                    description: fsm.analysisStageLabel.isNotEmpty
+                        ? fsm.analysisStageLabel
+                        : ClinicalCopy.loadingDspBody,
+                    progress: fsm.analysisProgress,
+                    progressLabel: frameLabel,
                   ),
                   const SizedBox(height: 16),
                   ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: 56),
                     child: OutlinedButton(
-                      key: const Key('fall_guard_escalate_button'),
-                      onPressed: onTriggerEmergencyNow,
+                      key: const Key('analysis_cancel_button'),
+                      onPressed: onCancelAnalysis,
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(
-                          color: Color(0x99FFFFFF),
-                          width: 1.5,
-                        ),
+                        side: const BorderSide(color: AppColors.subtleBorderDark),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
                       ),
                       child: Text(
-                        'Hubungi Bantuan Sekarang',
+                        'Batalkan Analisis',
                         style: AppTypography.buttonLabel(
                           color: AppColors.pureWhite,
                           size: 15.5,
@@ -935,17 +801,8 @@ class _FallGuardView extends StatelessWidget {
                       ),
                     ),
                   ),
-                ] else
-                  ParkinPrimaryPillButton(
-                    key: const Key('emergency_finish_button'),
-                    label: 'Hentikan Sirine & Selesai',
-                    backgroundColor: AppColors.alertRed,
-                    leadingIcon: ParkinIcons.stopSquare(
-                      color: AppColors.alertRed,
-                    ),
-                    onPressed: onFinishAfterEmergency,
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -970,6 +827,7 @@ class _PostSessionSummaryView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final record = uiState.completedRecord;
+    final protocol = record?.summary.protocol ?? uiState.fsm.protocol;
     final fogPct =
         (record?.summary.fogPercentage ?? 0.0).toStringAsFixed(1).replaceAll(
               '.',
@@ -990,13 +848,13 @@ class _PostSessionSummaryView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Ringkasan Sesi Tes 360°',
+                  'Ringkasan ${protocol.titleId}',
                   style: AppTypography.screenTitle(size: 24),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   record?.isSimulatedPreview ?? false
-                      ? 'Data Simulasi Kamera · $medLabel'
+                      ? 'Data Simulasi Video · $medLabel'
                       : 'Sesi Selesai · $medLabel',
                   style: AppTypography.captionBadge(
                     color: AppColors.onIceAzure,
@@ -1118,7 +976,7 @@ class _PausedSessionView extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'Kamera dan cueing dilepas aman saat aplikasi berpindah ke latar belakang.',
+                'Kamera, suara, dan berkas sementara dilepas aman saat aplikasi berpindah ke latar belakang.',
                 textAlign: TextAlign.center,
                 style: AppTypography.bodyLarge(color: AppColors.darkMuted),
               ),
@@ -1139,6 +997,199 @@ class _PausedSessionView extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _TopCameraToolbar extends StatelessWidget {
+  const _TopCameraToolbar({
+    required this.cancelKey,
+    required this.protocolLabel,
+    required this.soundEnabled,
+    required this.onCancel,
+    required this.onToggleSound,
+  });
+
+  final Key cancelKey;
+  final String protocolLabel;
+  final bool soundEnabled;
+  final VoidCallback onCancel;
+  final VoidCallback onToggleSound;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Flexible(
+          child: _CompactCancelButton(
+            buttonKey: cancelKey,
+            label: 'Batal',
+            onPressed: onCancel,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.iceSurface,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                protocolLabel,
+                style: AppTypography.captionBadge(
+                  color: AppColors.onIceAzure,
+                  weight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _SoundIconButton(
+          enabled: soundEnabled,
+          onPressed: onToggleSound,
+        ),
+      ],
+    );
+  }
+}
+
+class _CompactCancelButton extends StatelessWidget {
+  const _CompactCancelButton({
+    required this.buttonKey,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$label sesi skrining',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Material(
+          color: AppColors.darkElevated,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            key: buttonKey,
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ParkinIcons.arrowBack(color: AppColors.pureWhite),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      style: AppTypography.buttonLabel(
+                        color: AppColors.pureWhite,
+                        size: 15.0,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SoundIconButton extends StatelessWidget {
+  const _SoundIconButton({
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: enabled ? 'Matikan instruksi suara' : 'Aktifkan instruksi suara',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
+        child: Material(
+          color: AppColors.darkElevated,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            key: const Key('record_sound_toggle'),
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(14),
+            child: Center(
+              child: enabled
+                  ? ParkinIcons.soundWave(color: AppColors.pureWhite, size: 22)
+                  : ParkinIcons.soundMuted(color: AppColors.darkMuted, size: 22),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordingProgressOverlay extends StatelessWidget {
+  const _RecordingProgressOverlay({
+    super.key,
+    required this.elapsedSeconds,
+    required this.totalSeconds,
+  });
+
+  final int elapsedSeconds;
+  final int totalSeconds;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = totalSeconds <= 0 ? 120 : totalSeconds;
+    final progress = (elapsedSeconds / total).clamp(0.0, 1.0);
+    return Container(
+      width: 184,
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+      decoration: BoxDecoration(
+        color: AppColors.midnightNavy.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${ParkinProgressPill.formatDuration(elapsedSeconds)} / '
+            '${ParkinProgressPill.formatDuration(total)}',
+            style: AppTypography.captionBadge(
+              color: AppColors.pureWhite,
+              weight: FontWeight.w700,
+              tabular: true,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              color: AppColors.rhythmAqua,
+              backgroundColor: AppColors.pureWhite.withValues(alpha: 0.25),
+            ),
+          ),
+        ],
       ),
     );
   }

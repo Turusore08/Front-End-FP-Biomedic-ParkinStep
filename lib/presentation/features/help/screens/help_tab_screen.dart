@@ -62,15 +62,15 @@ class HelpTabScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 10),
               const _GuideCard(
-                title: '3. Catat Obat ON / OFF',
+                title: '3. Pilih Tes & Rekam Sesuai Aba-Aba',
                 body:
-                    'Catat waktu minum Levodopa serta status ON atau OFF sebelum melakukan Tes 360° agar perbandingan grafik akurat.',
+                    'Pilih Tes Berputar 360°, Berjalan Bolak-Balik, atau Duduk-Berdiri, catat status obat ON/OFF, lalu ikuti perintah suara dan teks selama 2 menit sebelum menekan Kirim.',
               ),
               const SizedBox(height: 10),
               const _GuideCard(
-                title: '4. Privasi Video Otomatis',
+                title: '4. Ekstraksi Pose Lokal & Hapus Otomatis',
                 body:
-                    'Analisis dilakukan langsung di ponsel. Video tidak dikirim ke server dan otomatis terhapus setelah titik sendi selesai dibaca.',
+                    'Setelah Anda menekan Kirim, Pose Extractor menganalisis video langsung di ponsel Anda dan langsung menghapus berkas video secara otomatis.',
               ),
               const SizedBox(height: 18),
               Container(

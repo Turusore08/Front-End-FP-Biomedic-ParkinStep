@@ -12,6 +12,7 @@ import 'package:parkinstep/domain/enums/onboarding_auth_mode.dart';
 import 'package:parkinstep/infrastructure/persistence/local_onboarding_repository.dart';
 import 'package:parkinstep/presentation/features/metronome/screens/metronome_ras_screen.dart';
 import 'package:parkinstep/presentation/features/session_prep/screens/pre_flight_checklist_screen.dart';
+import 'package:parkinstep/presentation/features/session_prep/screens/test_selection_screen.dart';
 import 'package:parkinstep/presentation/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -103,9 +104,9 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
   });
 
-  group('S-04 Pre-Flight Safety Checklist & S-07 RAS Metronome Verification', () {
+  group('Test Selection, S-04 Pre-Flight Safety Checklist & S-07 RAS Metronome Verification', () {
     testWidgets(
-        'S-03 Tes 360 opens S-04, enforces 4/4 checks + med state, navigates to S-05 /session-live & cancels cleanly',
+        'S-03 Mulai Tes opens 3-test picker -> selects Jalan Bolak-Balik -> S-04 enforces 4/4 checks -> navigates to readyToRecord & cancels cleanly',
         (WidgetTester tester) async {
       final prefs = await _seedCompletedPrefs();
       final cueing = _NoopCueingPort();
@@ -115,10 +116,27 @@ void main() {
       await tester.tap(find.byKey(const Key('home_card_tes_360')));
       await tester.pumpAndSettle();
 
+      // Verify all 3 protocol cards are visible
+      expect(find.text('Pilih Jenis Tes'), findsOneWidget);
+      expect(find.byKey(const Key('test_card_turning360')), findsOneWidget);
+      expect(
+        find.byKey(const Key('test_card_walkBackAndForth')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('test_card_sitToStand')), findsOneWidget);
+
+      await tester.ensureVisible(
+        find.byKey(const Key('test_card_walkBackAndForth')),
+      );
+      await tester.tap(find.byKey(const Key('test_card_walkBackAndForth')));
+      await tester.pumpAndSettle();
+
       expect(find.text('Keselamatan Sebelum Tes'), findsOneWidget);
+      expect(find.text('Tes Berjalan Bolak-Balik · 2 Menit'), findsOneWidget);
+      expect(find.text('Jalur Lurus Bebas 3 m'), findsOneWidget);
       expect(find.text('Lanjut ke Kamera (0/4)'), findsOneWidget);
 
-      // Disabled at 0/4 does not navigate to S-05 live camera session
+      // Disabled at 0/4 does not navigate to camera screen
       await tester.ensureVisible(
         find.byKey(const Key('preflight_continue_button')),
       );
@@ -148,11 +166,11 @@ void main() {
         find.byKey(const Key('preflight_continue_button')),
       );
       await tester.tap(find.byKey(const Key('preflight_continue_button')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('live_cancel_button')), findsOneWidget);
-      expect(find.byKey(const Key('calibration_status_card')), findsOneWidget);
+      expect(find.byKey(const Key('record_ready_card')), findsOneWidget);
+      expect(find.byKey(const Key('record_start_button')), findsOneWidget);
 
       await tester.ensureVisible(find.byKey(const Key('live_cancel_button')));
       await tester.tap(find.byKey(const Key('live_cancel_button')));
@@ -223,6 +241,38 @@ void main() {
 
       expect(find.text('01:00'), findsOneWidget);
       expect(find.byKey(const Key('metronome_reset_button')), findsNothing);
+    });
+
+    testWidgets(
+        'A11y 360x640 @ 1.5x TextScaler: TestSelectionScreen renders zero overflow & >= 56/96dp touch targets',
+        (WidgetTester tester) async {
+      final prefs = await _seedCompletedPrefs();
+      await _pumpA11yViewport(
+        tester,
+        prefs: prefs,
+        child: const TestSelectionScreen(),
+      );
+
+      expect(
+        tester.getSize(find.byKey(const Key('select_test_back_button'))).height,
+        greaterThanOrEqualTo(56.0),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('select_test_voice_button'))).height,
+        greaterThanOrEqualTo(56.0),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('test_card_turning360'))).height,
+        greaterThanOrEqualTo(96.0),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('test_card_walkBackAndForth'))).height,
+        greaterThanOrEqualTo(96.0),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('test_card_sitToStand'))).height,
+        greaterThanOrEqualTo(96.0),
+      );
     });
 
     testWidgets(

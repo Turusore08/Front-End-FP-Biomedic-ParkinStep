@@ -1,162 +1,150 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parkinstep/application/state_machines/clinical_session_fsm.dart';
-import 'package:parkinstep/domain/entities/live_frame_result.dart';
-import 'package:parkinstep/domain/enums/alert_tier.dart';
+import 'package:parkinstep/domain/entities/window_prediction_item.dart';
 import 'package:parkinstep/domain/enums/medication_state.dart';
+import 'package:parkinstep/domain/enums/session_protocol.dart';
 import 'package:parkinstep/domain/enums/session_stage.dart';
-import 'package:parkinstep/domain/value_objects/keypoint_2d.dart';
 
-LiveFrameResult _frame({
-  int seq = 1,
-  double lb6Conf = 0.90,
-  double rawProb = 0.08,
-  double hipDropRatio = 0.0,
-  bool isImmobile = false,
-}) {
-  return LiveFrameResult(
-    sequenceId: seq,
-    timestampMs: seq * 66,
-    imageWidth: 480,
-    imageHeight: 640,
-    keypoints17: List<Keypoint2D>.filled(
-      17,
-      Keypoint2D(x: 240, y: 320, conf: lb6Conf),
-    ),
-    lb6AvgConf: lb6Conf,
-    effectiveFps: 15.0,
-    rawProb: rawProb,
-    freezeIndex: rawProb >= 0.26 ? 2.41 : 0.40,
-    hipDropRatio: hipDropRatio,
-    isImmobile: isImmobile,
+WindowPredictionItem _win(int idx, {required bool rawPositive}) {
+  return WindowPredictionItem(
+    windowIdx: idx,
+    startSec: idx.toDouble(),
+    endSec: idx + 2.0,
+    rawProb: rawPositive ? 0.65 : 0.08,
+    calibratedScore: rawPositive ? 76.4 : 15.4,
+    predRaw: rawPositive,
+    predPostprocessed: false,
+    freezeIndexAnkle: rawPositive ? 2.4 : 0.4,
+    bilateralAsymAnkle: 0.1,
   );
 }
 
 void main() {
   const fsm = ClinicalSessionFsm();
 
-  group('ClinicalSessionFsm Deterministic Transitions', () {
-    test('Low light > 3s shows error card & retryCalibration recovers cleanly through calibration into recording', () {
-      var s = const ClinicalSessionFsmState(medState: MedicationState.on);
-      s = fsm.onLiveFrame(s, _frame(lb6Conf: 0.10)).state;
-
-      // 4 bad 1-second ticks (> 3s continuous LB6 < 0.20) trigger low-light error
-      for (var i = 0; i < 4; i++) {
-        s = fsm.onOneSecondTick(s).state;
-      }
-      expect(s.showLowLightError, isTrue);
-      expect(s.stage, SessionStage.framingCheck);
-
-      // Retry resets error & accepts good LB6 frames -> 2s framing lock -> 3s calibration -> recordingActive
-      s = fsm.retryCalibration(s).state;
-      expect(s.showLowLightError, isFalse);
-
-      s = fsm.onLiveFrame(s, _frame(seq: 2, lb6Conf: 0.92)).state;
-      s = fsm.onOneSecondTick(s).state;
-      expect(s.stage, SessionStage.framingCheck);
-      s = fsm.onOneSecondTick(s).state;
-      expect(s.stage, SessionStage.calibratingStanding);
-      expect(s.calibrationRemainingSec, 3);
-
-      for (var i = 0; i < 3; i++) {
-        s = fsm.onOneSecondTick(s).state;
-      }
-      expect(s.stage, SessionStage.recordingActive);
-      expect(s.alertTier, AlertTier.gaitNormal);
-    });
-
-    test('Two-Tier Alert enforces min_run=2 confirmation and 2-window recovery hysteresis', () {
+  group('ClinicalSessionFsm Video-Based Transitions & Min-Run Postprocessing', () {
+    test('Countdown (3-2-1) -> 120s guided recording -> milestone voice cues -> auto-stop to reviewRecorded', () {
       var s = const ClinicalSessionFsmState(
-        stage: SessionStage.recordingActive,
-        medState: MedicationState.off,
+        protocol: SessionProtocol.walkBackAndForth,
+        medState: MedicationState.on,
       );
+      expect(s.stage, SessionStage.readyToRecord);
 
-      // Single positive window -> EARLY_WARNING only (no full metronome cueing yet)
-      s = fsm.onLiveFrame(s, _frame(rawProb: 0.65)).state;
-      var step = fsm.onOneSecondTick(s);
+      // Start 3-second countdown
+      var step = fsm.requestStartCountdown(s);
       s = step.state;
-      expect(s.alertTier, AlertTier.earlyWarning);
-      expect(step.effects, contains(SessionFsmEffect.playEarlyWarningChime));
-      expect(step.effects, isNot(contains(SessionFsmEffect.startFogCueing)));
+      expect(s.stage, SessionStage.countdown);
+      expect(s.countdownRemainingSec, 3);
+      expect(step.effects, contains(SessionFsmEffect.playCountdownBeep));
 
-      // Second consecutive positive window -> FOG_CONFIRMED & starts metronome cueing
+      // Ticks 3 -> 2 -> 1
       step = fsm.onOneSecondTick(s);
       s = step.state;
-      expect(s.alertTier, AlertTier.fogConfirmed);
-      expect(s.episodeCount, 1);
-      expect(s.confirmedFogWindowCount, 2);
-      expect(step.effects, contains(SessionFsmEffect.startFogCueing));
+      expect(s.countdownRemainingSec, 2);
+      expect(step.effects, contains(SessionFsmEffect.playCountdownBeep));
 
-      // First normal window keeps FOG_CONFIRMED (hysteresis prevents flicker)
-      s = fsm.onLiveFrame(s, _frame(seq: 2, rawProb: 0.05)).state;
       step = fsm.onOneSecondTick(s);
       s = step.state;
-      expect(s.alertTier, AlertTier.fogConfirmed);
-      expect(step.effects, isEmpty);
+      expect(s.countdownRemainingSec, 1);
+      expect(step.effects, contains(SessionFsmEffect.playCountdownBeep));
 
-      // Second consecutive normal window returns to GAIT_NORMAL & stops cueing
+      // Final countdown tick enters recordingActive and speaks 0s cue
       step = fsm.onOneSecondTick(s);
       s = step.state;
-      expect(s.alertTier, AlertTier.gaitNormal);
-      expect(step.effects, contains(SessionFsmEffect.stopFogCueing));
-    });
+      expect(s.stage, SessionStage.recordingActive);
+      expect(s.elapsedSec, 0);
+      expect(step.effects, contains(SessionFsmEffect.startVideoRecording));
+      expect(step.effects, contains(SessionFsmEffect.speakCue));
+      expect(s.effectiveCue.atSecond, 0);
 
-    test('Prolonged freeze > 15s opens Fall Guard and Im OK cancels cleanly as false alarm', () {
-      var s = const ClinicalSessionFsmState(stage: SessionStage.recordingActive);
-      s = fsm.onLiveFrame(s, _frame(rawProb: 0.70)).state;
-
-      // Windows 1..15 remain in recordingActive; window 16 (> 15s) triggers Fall Guard
-      for (var i = 0; i < 15; i++) {
-        s = fsm.onOneSecondTick(s).state;
+      // Advance 1..119s and verify milestone speech at 30, 60, 90, 110
+      final spokenMilestones = <int>[];
+      for (var t = 1; t < 120; t++) {
+        step = fsm.onOneSecondTick(s);
+        s = step.state;
         expect(s.stage, SessionStage.recordingActive);
+        expect(s.elapsedSec, t);
+        if (step.effects.contains(SessionFsmEffect.speakCue)) {
+          spokenMilestones.add(t);
+        }
       }
+      expect(spokenMilestones, <int>[30, 60, 90, 110]);
+      expect(s.effectiveCue.atSecond, 110);
 
-      final triggerStep = fsm.onOneSecondTick(s);
-      s = triggerStep.state;
-      expect(s.stage, SessionStage.fallGuardActive);
-      expect(s.alertTier, AlertTier.fallGuard);
-      expect(s.fallCountdownSec, 10);
-      expect(triggerStep.effects, contains(SessionFsmEffect.startFallGuardAlarm));
-
-      // Cancelling within 10s logs false alarm & resumes normal gait monitoring
-      final cancelStep = fsm.cancelFallGuard(s);
-      s = cancelStep.state;
-      expect(s.stage, SessionStage.recordingActive);
-      expect(s.alertTier, AlertTier.gaitNormal);
-      expect(s.fallGuardFalseAlarms, 1);
-      expect(cancelStep.effects, contains(SessionFsmEffect.stopFallGuardAlarm));
+      // Tick 120 auto-stops recording into reviewRecorded
+      step = fsm.onOneSecondTick(s);
+      s = step.state;
+      expect(s.stage, SessionStage.reviewRecorded);
+      expect(s.recordedDurationSec, 120);
+      expect(s.canSubmitVideo, isTrue);
+      expect(step.effects, contains(SessionFsmEffect.stopVideoRecording));
+      expect(step.effects, contains(SessionFsmEffect.stopVoice));
+      expect(step.effects, contains(SessionFsmEffect.playCompletionChime));
     });
 
-    test('Sudden hip drop >= 0.65 & immobile >= 3s triggers Fall Guard -> 10s expiry dispatches alert', () {
-      var s = const ClinicalSessionFsmState(stage: SessionStage.recordingActive);
-      s = fsm
-          .onLiveFrame(s, _frame(hipDropRatio: 0.78, isImmobile: true))
-          .state;
-
-      s = fsm.onOneSecondTick(s).state;
-      s = fsm.onOneSecondTick(s).state;
-      expect(s.stage, SessionStage.recordingActive);
-
-      // 3rd second triggers Fall Guard
-      s = fsm.onOneSecondTick(s).state;
-      expect(s.stage, SessionStage.fallGuardActive);
-
-      // Count down 10 seconds to 0 -> emergencyDispatched
-      late ({ClinicalSessionFsmState state, List<SessionFsmEffect> effects}) last;
-      for (var i = 0; i < 10; i++) {
-        last = fsm.onOneSecondTick(s);
-        s = last.state;
-      }
-      expect(s.stage, SessionStage.emergencyDispatched);
-      expect(s.fallCountdownSec, 0);
-      expect(last.effects, contains(SessionFsmEffect.dispatchEmergencyAlert));
-
-      // Manual finish moves to postSessionAnalyzing
-      final finishStep = fsm.requestManualFinish(s);
-      expect(finishStep.state.stage, SessionStage.postSessionAnalyzing);
-      expect(
-        finishStep.effects,
-        contains(SessionFsmEffect.beginPostSessionAnalysis),
+    test('Short < 3s recording blocks submission until retaken >= 3s', () {
+      var s = const ClinicalSessionFsmState(
+        protocol: SessionProtocol.sitToStand,
+        stage: SessionStage.recordingActive,
+        elapsedSec: 2,
       );
+
+      var step = fsm.requestStopRecording(s);
+      s = step.state;
+      expect(s.stage, SessionStage.reviewRecorded);
+      expect(s.recordedDurationSec, 2);
+      expect(s.canSubmitVideo, isFalse);
+
+      // Submit blocked under 3 seconds
+      final blocked = fsm.requestSubmitVideo(s);
+      expect(blocked.state.stage, SessionStage.reviewRecorded);
+      expect(blocked.effects, isEmpty);
+
+      // Retake returns cleanly to readyToRecord with temp video wipe effect
+      step = fsm.requestRetake(s);
+      s = step.state;
+      expect(s.stage, SessionStage.readyToRecord);
+      expect(step.effects, contains(SessionFsmEffect.deleteTempVideo));
+
+      // Longer recording (5s) allows submit -> analyzingVideo
+      s = s.copyWith(stage: SessionStage.recordingActive, elapsedSec: 5);
+      s = fsm.requestStopRecording(s).state;
+      s = fsm.attachRecordedVideoPath(s, '/tmp/test.mp4');
+      expect(s.canSubmitVideo, isTrue);
+
+      final submit = fsm.requestSubmitVideo(s);
+      expect(submit.state.stage, SessionStage.analyzingVideo);
+      expect(submit.effects, contains(SessionFsmEffect.beginVideoAnalysis));
+    });
+
+    test('applyMinRunPostProcessing filters isolated single-window spikes & groups confirmed episodes', () {
+      final raw = <WindowPredictionItem>[
+        _win(0, rawPositive: false),
+        _win(1, rawPositive: true), // isolated 1-window spike -> suppressed
+        _win(2, rawPositive: false),
+        _win(3, rawPositive: true), // confirmed run length 3
+        _win(4, rawPositive: true),
+        _win(5, rawPositive: true),
+        _win(6, rawPositive: false),
+      ];
+
+      final post = ClinicalSessionFsm.applyMinRunPostProcessing(raw, minRun: 2);
+      expect(post.map((w) => w.predPostprocessed).toList(), <bool>[
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
+      ]);
+
+      final episodes = ClinicalSessionFsm.extractConfirmedEpisodes(post);
+      expect(episodes, hasLength(1));
+      expect(episodes.first.episodeIndex, 1);
+      expect(episodes.first.startSec, 3.0);
+      expect(episodes.first.endSec, 7.0);
+      expect(episodes.first.durationSec, 4.0);
     });
   });
 }

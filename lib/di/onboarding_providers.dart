@@ -6,7 +6,7 @@ import '../application/controllers/onboarding_ui_state.dart';
 import '../application/ports/auth_gateway_port.dart';
 import '../application/ports/onboarding_repository_port.dart';
 import '../application/ports/voice_guide_port.dart';
-import '../infrastructure/cueing/noop_voice_guide_adapter.dart';
+import '../infrastructure/cueing/platform_voice_guide_adapter.dart';
 import '../infrastructure/network/local_preview_auth_gateway.dart';
 import '../infrastructure/persistence/local_onboarding_repository.dart';
 
@@ -24,7 +24,7 @@ final authGatewayProvider = Provider<AuthGatewayPort>(
 );
 
 final voiceGuideProvider = Provider<VoiceGuidePort>(
-  (ref) => const NoopVoiceGuideAdapter(),
+  (ref) => const PlatformVoiceGuideAdapter(),
 );
 
 /// Riverpod 3 Notifier binding pure-Dart OnboardingCoordinator to Flutter UI.

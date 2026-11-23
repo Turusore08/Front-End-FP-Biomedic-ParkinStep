@@ -47,38 +47,36 @@ abstract final class ClinicalCopy {
   // S-03 Home Dashboard & Navigation Shell
   static const String dashboardStartSectionTitle = 'Pilih untuk Memulai';
   static const String dashboardRecentSessionsTitle = 'Sesi Terakhir';
-  static const String reminderTitle = 'Sudah siap latihan langkah hari ini?';
+  static const String reminderTitle = 'Sudah siap latihan tes hari ini?';
   static const String reminderBody =
-      'Tes putar 360° selama 2 menit membantu memantau gejala FoG harian '
-      'secara objektif.';
+      'Pilih salah satu dari 3 tes video 2 menit (Berputar, Jalan Bolak-Balik, atau Duduk-Berdiri).';
   static const String emptyHistoryTitle = 'Belum ada riwayat sesi';
   static const String emptyHistoryBody =
-      'Selesaikan satu Tes 360° selama 2 menit agar skor FoG dan perbandingan '
-      'ON/OFF obat mulai tercatat di perangkat ini.';
+      'Selesaikan satu rekaman tes 2 menit lalu tekan Kirim agar Pose Extractor menghitung skor FoG secara lokal.';
   static const String emptyHistoryCta = 'Mulai Tes Pertama';
   static const String privacyShieldTitle = 'Perlindungan Privasi & Data';
   static const String privacyShieldGuarantee =
-      'Video kamera diproses langsung di ponsel Anda dan otomatis dihapus '
-      'segera setelah titik sendi terbaca.';
+      'Video rekaman diproses langsung oleh Pose Extractor di ponsel Anda dan otomatis dihapus segera setelah analisis selesai.';
   static const String helpVoiceGuideDetail =
-      'Panduan penggunaan ParkinStep. Pertama, letakkan ponsel setinggi '
-      'pinggang pada jarak 2 hingga 3 meter dengan pencahayaan ruangan yang '
-      'terang agar pinggul hingga pergelangan kaki terlihat penuh. Kedua, catat '
-      'status obat Levodopa ON atau OFF sebelum tes agar dokter dapat menilai '
-      'pengaruh obat terhadap gejala langkah membeku. Ketiga, seluruh video '
-      'kamera dianalisis langsung di ponsel dan otomatis dihapus setelah titik '
-      'sendi terbaca.';
+      'Panduan penggunaan ParkinStep berbasis video. Pertama, pilih salah satu dari tiga jenis tes dua menit, yaitu Tes Berputar 360 derajat, Tes Berjalan Bolak-Balik, atau Tes Duduk Berdiri. Kedua, posisikan ponsel setinggi pinggang pada jarak dua hingga tiga meter agar pinggul sampai mata kaki terlihat penuh. Ketiga, ikuti aba-aba suara dan teks saat merekam, lalu tekan Kirim setelah selesai agar Pose Extractor memproses video langsung di ponsel dan menghapus video secara otomatis.';
+
+  // Test Selection Screen
+  static const String testSelectionTitle = 'Pilih Jenis Tes';
+  static const String testSelectionSubtitle =
+      'Pilih satu protokol tes 2 menit yang akan direkam lalu dianalisis secara lokal.';
+  static const String testSelectionVoiceGuide =
+      'Silakan pilih salah satu dari tiga tes berikut: Tes Berputar 360 derajat selama dua menit, Tes Berjalan Bolak-Balik selama dua menit, atau Tes Duduk Berdiri selama dua menit.';
 
   // S-04 Pre-Flight Safety Checklist
   static const String preflightTitle = 'Keselamatan Sebelum Tes';
   static const String preflightSubtitle =
-      'Pastikan 4 syarat aman berikut sebelum mengarahkan kamera untuk Tes 360°.';
+      'Pastikan 4 syarat aman berikut sebelum mengarahkan kamera untuk merekam tes.';
   static const String preflightFloorTitle = 'Lingkungan Lantai Aman';
   static const String preflightFloorDesc =
       'Lantai kering, rata, bebas kabel, atau karpet terlipat.';
   static const String preflightSpaceTitle = 'Ruang Gerak Bebas 1,5 m';
   static const String preflightSpaceDesc =
-      'Tersedia area kosong minimal radius 1,5 meter untuk berputar.';
+      'Tersedia area kosong minimal radius 1,5 meter untuk bergerak aman.';
   static const String preflightSupportTitle = 'Kursi atau Pendamping Siap';
   static const String preflightSupportDesc =
       'Ada penopang kokoh atau pendamping di luar pusat layar.';
@@ -86,12 +84,7 @@ abstract final class ClinicalCopy {
   static const String preflightAttireDesc =
       'Alas kaki tidak licin dan tungkai terlihat jelas dari pinggul ke mata kaki.';
   static const String preflightVoiceGuide =
-      'Panduan keselamatan sebelum tes putar 360 derajat. Pertama, pastikan '
-      'lantai kering dan bebas kabel. Kedua, sisakan ruang kosong berputar satu '
-      'koma lima meter. Ketiga, siapkan kursi kokoh atau pendamping di dekat '
-      'Anda. Keempat, pilih alas kaki yang aman dan pastikan lutut hingga '
-      'pergelangan kaki terlihat kamera. Terakhir, pilih status obat ON atau OFF '
-      'sebelum menekan Lanjut ke Kamera.';
+      'Panduan keselamatan sebelum tes. Pertama, pastikan lantai kering dan bebas kabel. Kedua, sisakan ruang gerak aman tanpa rintangan. Ketiga, siapkan kursi kokoh atau pendamping di dekat Anda. Keempat, pilih alas kaki yang aman dan pastikan pinggul hingga mata kaki terlihat kamera. Terakhir, pilih status obat ON atau OFF sebelum menekan Lanjut ke Kamera.';
 
   // S-07 RAS Metronome
   static const String metronomeHelpTitle = 'Cara Menggunakan Metronom RAS';
@@ -106,22 +99,24 @@ abstract final class ClinicalCopy {
       '40 sampai 120 ketukan per menit, lalu tekan Mulai Metronom untuk '
       'mendengarkan irama langkah.';
 
-  // S-05 Framing, Kalibrasi & R-27 State Cards
-  static const String framingTitle = 'Posisikan Kaki di Tengah Kotak';
-  static const String framingBody =
-      'Mundur 2-3 meter agar pinggul sampai mata kaki terlihat penuh dalam bingkai.';
-  static const String calibratingTitle = 'Berdiri Stabil...';
-  static const String calibratingBody =
-      'Menjaga posisi berdiri tegak 3 detik untuk mengunci ukuran tungkai LB6.';
+  // Video Recording, Confirmation, Pose Extraction & State Cards
+  static const String readyToRecordTitle = 'Siap Merekam Video Tes';
+  static const String readyToRecordBody =
+      'Posisikan pinggul sampai mata kaki di dalam bingkai, lalu tekan Mulai Rekam dan ikuti perintah di layar.';
+  static const String reviewRecordedTitle = 'Rekaman Selesai';
+  static const String reviewPrivacyGuarantee =
+      'Video hanya disimpan sementara di HP ini dan akan otomatis dihapus permanen begitu analisis selesai.';
+  static const String reviewShortVideoWarning =
+      'Durasi rekaman kurang dari 3 detik. Silakan ulangi rekaman minimal 3 detik agar analisis FoG valid.';
 
-  static const String errorLowLightTitle = 'Kaki kurang terlihat di kamera';
+  static const String errorLowLightTitle = 'Analisis video tidak dapat dilanjutkan';
   static const String errorLowLightBody =
-      'Nyalakan lampu ruangan, pastikan tidak ada benda menghalangi kaki, dan atur jarak kamera 2-3 meter.';
-  static const String errorLowLightCta = 'Coba Kalibrasi Ulang';
+      'Pastikan pencahayaan ruangan terang, tubuh terlihat penuh 2-3 meter dari kamera, lalu rekam ulang.';
+  static const String errorLowLightCta = 'Rekam Ulang';
 
-  static const String loadingDspTitle = 'Menganalisis gerak kaki...';
+  static const String loadingDspTitle = 'Mengekstrak pose dari video...';
   static const String loadingDspBody =
-      'Menghitung ringkasan skor FoG dan menghapus video sementara secara otomatis dari perangkat Anda.';
+      'Pose Extractor menganalisis gerakan secara offline di HP Anda dan otomatis menghapus video sementara setelah selesai.';
 
   // S-06 Two-Tier Highlight Prompts
   static const String livePromptNormalHighlight = 'BERPUTAR PERLAHAN';

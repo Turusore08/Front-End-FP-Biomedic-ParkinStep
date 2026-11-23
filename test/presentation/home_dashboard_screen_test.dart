@@ -11,6 +11,7 @@ import 'package:parkinstep/domain/entities/onboarding_status.dart';
 import 'package:parkinstep/domain/entities/session_summary_item.dart';
 import 'package:parkinstep/domain/enums/medication_state.dart';
 import 'package:parkinstep/domain/enums/onboarding_auth_mode.dart';
+import 'package:parkinstep/domain/enums/session_protocol.dart';
 import 'package:parkinstep/infrastructure/persistence/local_home_dashboard_repository.dart';
 import 'package:parkinstep/infrastructure/persistence/local_onboarding_repository.dart';
 import 'package:parkinstep/presentation/features/home/screens/home_dashboard_screen.dart';
@@ -75,7 +76,7 @@ void main() {
       expect(find.text('Selamat Pagi,'), findsOneWidget);
       expect(find.text('Pak Budi'), findsOneWidget);
       expect(find.text('Pilih untuk Memulai'), findsOneWidget);
-      expect(find.text('Tes 360°'), findsOneWidget);
+      expect(find.text('Mulai Tes'), findsOneWidget);
       expect(find.text('Cueing RAS'), findsOneWidget);
       expect(find.text('Catat Obat'), findsOneWidget);
       expect(find.text('Belum Ada Tes'), findsOneWidget);
@@ -151,6 +152,7 @@ void main() {
           SessionSummaryItem(
             sessionId: 'sess-1',
             startedAtUtc: DateTime.utc(2026, 11, 20, 7, 30),
+            protocol: SessionProtocol.sitToStand,
             medState: MedicationState.on,
             fogPercentage: 2.4,
             episodeCount: 0,
@@ -172,6 +174,7 @@ void main() {
 
       expect(find.byKey(const Key('home_empty_history_state')), findsNothing);
       expect(find.text('2,4% FoG'), findsOneWidget);
+      expect(find.textContaining('Duduk-Berdiri · ON Obat'), findsOneWidget);
       expect(find.text('2,4%'), findsOneWidget);
       expect(find.text('18,5%'), findsOneWidget);
     });

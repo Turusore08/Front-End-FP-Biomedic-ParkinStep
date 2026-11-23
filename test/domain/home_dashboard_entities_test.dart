@@ -3,6 +3,7 @@ import 'package:parkinstep/domain/entities/home_dashboard_summary.dart';
 import 'package:parkinstep/domain/entities/medication_log.dart';
 import 'package:parkinstep/domain/entities/session_summary_item.dart';
 import 'package:parkinstep/domain/enums/medication_state.dart';
+import 'package:parkinstep/domain/enums/session_protocol.dart';
 import 'package:parkinstep/domain/enums/session_sync_status.dart';
 
 void main() {
@@ -47,11 +48,14 @@ void main() {
       final s1 = SessionSummaryItem(
         sessionId: 'sess-1',
         startedAtUtc: t1,
+        protocol: SessionProtocol.sitToStand,
         medState: MedicationState.on,
         fogPercentage: 2.4,
         episodeCount: 1,
         durationSec: 120.0,
       );
+      expect(s1.protocol, SessionProtocol.sitToStand);
+      expect(s1.copyWith(protocol: SessionProtocol.walkBackAndForth).protocol, SessionProtocol.walkBackAndForth);
       final s2 = SessionSummaryItem(
         sessionId: 'sess-2',
         startedAtUtc: t2,

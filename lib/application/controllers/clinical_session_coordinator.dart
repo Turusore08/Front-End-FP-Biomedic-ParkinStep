@@ -1,31 +1,30 @@
 import 'dart:async';
 
-import '../../domain/constants/clinical_copy.dart';
 import '../../domain/entities/completed_session_record.dart';
-import '../../domain/entities/live_frame_result.dart';
 import '../../domain/entities/session_clinical_report.dart';
 import '../../domain/entities/session_summary_item.dart';
+import '../../domain/entities/video_analysis_result.dart';
 import '../../domain/enums/medication_state.dart';
 import '../../domain/enums/preview_gait_scenario.dart';
+import '../../domain/enums/session_protocol.dart';
 import '../../domain/enums/session_stage.dart';
 import '../ports/cueing_port.dart';
-import '../ports/edge_inference_port.dart';
-import '../ports/emergency_alert_port.dart';
 import '../ports/home_dashboard_repository_port.dart';
+import '../ports/video_session_port.dart';
 import '../ports/voice_guide_port.dart';
 import '../state_machines/clinical_session_fsm.dart';
 import 'clinical_session_ui_state.dart';
 import 'metronome_coordinator.dart';
 
-/// Pure Dart coordinator orchestrating the live S-05..S-08 screening session:
-/// consumes 15 Hz pose stream, drives 1 Hz ClinicalSessionFsm, coordinates
-/// Two-Tier RAS cueing / Fall Guard escalation, and persists post-session summaries.
+/// Pure Dart coordinator orchestrating the video-based screening flow:
+/// opens camera preview (no live skeleton inference) -> 3-2-1 countdown ->
+/// records 2-minute guided test -> review confirmation (Ulangi / Kirim) ->
+/// post-recording Pose Extractor + LightGBM + secure temp video wipe.
 class ClinicalSessionCoordinator {
   ClinicalSessionCoordinator({
-    required this.edgeInferencePort,
+    required this.videoSessionPort,
     required this.cueingPort,
     required this.voiceGuidePort,
-    required this.emergencyAlertPort,
     required this.dashboardRepository,
     required this.readState,
     required this.writeState,
@@ -39,10 +38,9 @@ class ClinicalSessionCoordinator {
 
   static String _defaultPatientName() => 'Pengguna';
 
-  final EdgeInferencePort edgeInferencePort;
+  final VideoSessionPort videoSessionPort;
   final CueingPort cueingPort;
   final VoiceGuidePort voiceGuidePort;
-  final EmergencyAlertPort emergencyAlertPort;
   final HomeDashboardRepositoryPort dashboardRepository;
   final ClinicalSessionUiState Function() readState;
   final void Function(ClinicalSessionUiState next) writeState;
@@ -51,44 +49,180 @@ class ClinicalSessionCoordinator {
   final PeriodicTimerFactory _periodicTimerFactory;
   final ClinicalSessionFsm _fsm;
 
-  StreamSubscription<LiveFrameResult>? _frameSubscription;
   Timer? _fsmTickTimer;
-  Timer? _rasCueBeatTimer;
-  int _rasBeatCounter = 0;
   DateTime? _sessionStartedUtc;
+  Future<void>? _pendingStopRecording;
+  int _sessionGeneration = 0;
 
-  Future<void> startSession({required MedicationState medState}) async {
-    cancelTimersAndStreamsOnly();
+  Future<void> startSession({
+    required SessionProtocol protocol,
+    required MedicationState medState,
+  }) async {
+    _cancelTimersOnly();
+    _sessionGeneration++;
+    final gen = _sessionGeneration;
     _sessionStartedUtc = _clock().toUtc();
-    _rasBeatCounter = 0;
+
+    final prevVideoPath = readState().fsm.recordedVideoPath;
+    if (prevVideoPath != null) {
+      unawaited(videoSessionPort.secureDeleteVideo(prevVideoPath));
+    }
 
     writeState(
       ClinicalSessionUiState(
-        fsm: ClinicalSessionFsmState(medState: medState),
-        isPreviewSimulation: edgeInferencePort.isPreviewSimulation,
+        fsm: ClinicalSessionFsmState(
+          protocol: protocol,
+          medState: medState,
+          activeCue: protocol.cueForElapsed(0),
+        ),
+        isPreviewSimulation: videoSessionPort.isPreviewSimulation,
+        isOpeningCamera: true,
       ),
     );
 
-    final stream = edgeInferencePort.startLiveStream(medState: medState);
-    _frameSubscription = stream.listen(
-      (LiveFrameResult frame) {
-        final result = _fsm.onLiveFrame(readState().fsm, frame);
-        writeState(readState().copyWith(fsm: result.state));
-      },
-      onError: (_) {
-        writeState(
-          readState().copyWith(
-            errorMessage:
-                'Koneksi kamera terhenti sementara. Silakan ulangi sesi.',
-          ),
-        );
-      },
-    );
+    try {
+      await videoSessionPort.openCameraPreview();
+      if (gen != _sessionGeneration) return;
+      writeState(readState().copyWith(isOpeningCamera: false, clearError: true));
+    } catch (_) {
+      if (gen != _sessionGeneration) return;
+      writeState(
+        readState().copyWith(
+          isOpeningCamera: false,
+          errorMessage:
+              'Kamera tidak dapat dibuka. Pastikan izin kamera aktif dan coba lagi.',
+        ),
+      );
+    }
+  }
 
+  void startCountdown() {
+    final current = readState();
+    if (current.isOpeningCamera || current.isPausedByLifecycle) return;
+    final transition = _fsm.requestStartCountdown(current.fsm);
+    writeState(current.copyWith(fsm: transition.state, clearError: true));
+    _executeEffects(transition.effects, transition.state);
+
+    _fsmTickTimer?.cancel();
     _fsmTickTimer = _periodicTimerFactory(
       const Duration(seconds: 1),
       (_) => _handleSecondTick(),
     );
+  }
+
+  void stopRecording() {
+    _fsmTickTimer?.cancel();
+    _fsmTickTimer = null;
+    final current = readState();
+    final transition = _fsm.requestStopRecording(current.fsm);
+    writeState(current.copyWith(fsm: transition.state));
+    _executeEffects(transition.effects, transition.state);
+  }
+
+  Future<void> retakeRecording() async {
+    _fsmTickTimer?.cancel();
+    _fsmTickTimer = null;
+    final pendingStop = _pendingStopRecording;
+    if (pendingStop != null) {
+      await pendingStop.catchError((Object _) {});
+    }
+
+    final current = readState();
+    final videoToDelete = current.fsm.recordedVideoPath;
+    final transition = _fsm.requestRetake(current.fsm);
+    if (transition.state == current.fsm) return;
+
+    _sessionGeneration++;
+    final gen = _sessionGeneration;
+    videoSessionPort.cancelAnalysis();
+
+    writeState(
+      current.copyWith(
+        fsm: transition.state,
+        isOpeningCamera: true,
+        clearCompletedRecord: true,
+        clearError: true,
+      ),
+    );
+    _executeEffects(
+      transition.effects,
+      transition.state,
+      overrideVideoPath: videoToDelete,
+    );
+
+    try {
+      await videoSessionPort.openCameraPreview();
+      if (gen != _sessionGeneration) return;
+      writeState(readState().copyWith(isOpeningCamera: false));
+    } catch (_) {
+      if (gen != _sessionGeneration) return;
+      writeState(
+        readState().copyWith(
+          isOpeningCamera: false,
+          errorMessage: 'Gagal membuka kembali kamera untuk rekam ulang.',
+        ),
+      );
+    }
+  }
+
+  Future<void> submitVideoForAnalysis() async {
+    final pendingStop = _pendingStopRecording;
+    if (pendingStop != null) {
+      await pendingStop.catchError((Object _) {});
+    }
+
+    final current = readState();
+    final transition = _fsm.requestSubmitVideo(current.fsm);
+    if (transition.state == current.fsm) return;
+
+    writeState(current.copyWith(fsm: transition.state, clearError: true));
+    _executeEffects(transition.effects, transition.state);
+  }
+
+  Future<void> cancelAnalysis() async {
+    videoSessionPort.cancelAnalysis();
+    await retakeRecording();
+  }
+
+  void toggleSound() {
+    final current = readState();
+    final nextFsm = _fsm.toggleSound(current.fsm);
+    writeState(current.copyWith(fsm: nextFsm));
+    if (!nextFsm.soundEnabled) {
+      unawaited(voiceGuidePort.stop());
+    }
+  }
+
+  void setPreviewScenario(PreviewGaitScenario scenario) {
+    videoSessionPort.setPreviewScenario(scenario);
+  }
+
+  void handleLifecyclePaused() {
+    _cancelTimersOnly();
+    _sessionGeneration++;
+    videoSessionPort.cancelAnalysis();
+    unawaited(voiceGuidePort.stop());
+    final current = readState();
+    final videoPath = current.fsm.recordedVideoPath;
+    unawaited(videoSessionPort.closeCameraPreview());
+    if (videoPath != null) {
+      unawaited(videoSessionPort.secureDeleteVideo(videoPath));
+    }
+    writeState(current.copyWith(isPausedByLifecycle: true));
+  }
+
+  /// Stops timers & releases active camera/TTS/video resources without mutating state during dispose.
+  void cancelTimersAndStreamsOnly() {
+    _cancelTimersOnly();
+    _sessionGeneration++;
+    videoSessionPort.cancelAnalysis();
+    unawaited(voiceGuidePort.stop());
+    unawaited(videoSessionPort.closeCameraPreview());
+  }
+
+  void _cancelTimersOnly() {
+    _fsmTickTimer?.cancel();
+    _fsmTickTimer = null;
   }
 
   void _handleSecondTick() {
@@ -97,183 +231,167 @@ class ClinicalSessionCoordinator {
 
     final transition = _fsm.onOneSecondTick(current.fsm);
     writeState(current.copyWith(fsm: transition.state));
-    _executeEffects(transition.effects, transition.state);
-  }
-
-  void retryCalibration() {
-    final current = readState();
-    final transition = _fsm.retryCalibration(current.fsm);
-    writeState(current.copyWith(fsm: transition.state, clearError: true));
-    _executeEffects(transition.effects, transition.state);
-  }
-
-  void cancelFallGuard() {
-    final current = readState();
-    final transition = _fsm.cancelFallGuard(current.fsm);
-    writeState(current.copyWith(fsm: transition.state));
-    _executeEffects(transition.effects, transition.state);
-  }
-
-  void triggerEmergencyNow() {
-    final current = readState();
-    final transition = _fsm.triggerEmergencyNow(current.fsm);
-    writeState(current.copyWith(fsm: transition.state));
-    _executeEffects(transition.effects, transition.state);
-  }
-
-  void finishSessionEarly() {
-    final current = readState();
-    final transition = _fsm.requestManualFinish(current.fsm);
-    writeState(current.copyWith(fsm: transition.state));
-    _executeEffects(transition.effects, transition.state);
-  }
-
-  void setPreviewScenario(PreviewGaitScenario scenario) {
-    edgeInferencePort.setPreviewScenario(scenario);
-  }
-
-  void handleLifecyclePaused() {
-    cancelTimersAndStreamsOnly();
-    unawaited(edgeInferencePort.stopLiveStream());
-    unawaited(voiceGuidePort.stop());
-    unawaited(emergencyAlertPort.stopLocalSiren());
-    writeState(readState().copyWith(isPausedByLifecycle: true));
-  }
-
-  /// Stops timers & stream subscriptions WITHOUT mutating Riverpod state.
-  void cancelTimersAndStreamsOnly() {
-    _fsmTickTimer?.cancel();
-    _fsmTickTimer = null;
-    _rasCueBeatTimer?.cancel();
-    _rasCueBeatTimer = null;
-    final sub = _frameSubscription;
-    _frameSubscription = null;
-    if (sub != null) {
-      unawaited(sub.cancel());
+    if (transition.state.stage == SessionStage.reviewRecorded) {
+      _cancelTimersOnly();
     }
+    _executeEffects(transition.effects, transition.state);
   }
 
   void _executeEffects(
     List<SessionFsmEffect> effects,
-    ClinicalSessionFsmState fsmState,
-  ) {
+    ClinicalSessionFsmState fsmState, {
+    String? overrideVideoPath,
+  }) {
     for (final effect in effects) {
       switch (effect) {
-        case SessionFsmEffect.playEarlyWarningChime:
+        case SessionFsmEffect.playCountdownBeep:
           unawaited(
             cueingPort.playMetronomeBeat(
               accented: false,
-              soundEnabled: true,
+              soundEnabled: fsmState.soundEnabled,
               hapticEnabled: true,
             ),
           );
-        case SessionFsmEffect.startFogCueing:
-          _startFogCueing();
-        case SessionFsmEffect.stopFogCueing:
-          _stopFogCueing();
-        case SessionFsmEffect.startFallGuardAlarm:
-          _stopFogCueing();
-          unawaited(emergencyAlertPort.triggerLocalSiren());
-          unawaited(voiceGuidePort.speak(ClinicalCopy.fallGuardVoicePrompt));
-        case SessionFsmEffect.stopFallGuardAlarm:
-          unawaited(emergencyAlertPort.stopLocalSiren());
+        case SessionFsmEffect.speakCue:
+          if (fsmState.soundEnabled) {
+            unawaited(voiceGuidePort.speak(fsmState.effectiveCue.voicePrompt));
+          }
+        case SessionFsmEffect.stopVoice:
           unawaited(voiceGuidePort.stop());
-        case SessionFsmEffect.dispatchEmergencyAlert:
-          unawaited(emergencyAlertPort.triggerLocalSiren());
+        case SessionFsmEffect.startVideoRecording:
+          unawaited(_startVideoCapture(_sessionGeneration));
+        case SessionFsmEffect.stopVideoRecording:
+          _pendingStopRecording = _stopVideoCapture(_sessionGeneration);
+        case SessionFsmEffect.playCompletionChime:
           unawaited(
-            emergencyAlertPort.dispatchCaregiverAlert(
-              reason: fsmState.fallTriggerReason,
+            cueingPort.playCompletionChime(
+              soundEnabled: fsmState.soundEnabled,
+              hapticEnabled: true,
             ),
           );
-        case SessionFsmEffect.beginPostSessionAnalysis:
-          _stopFogCueing();
-          unawaited(_finalizeSession(fsmState));
+        case SessionFsmEffect.deleteTempVideo:
+          final path = overrideVideoPath ?? fsmState.recordedVideoPath;
+          if (path != null) {
+            unawaited(videoSessionPort.secureDeleteVideo(path));
+          }
+        case SessionFsmEffect.beginVideoAnalysis:
+          unawaited(_runPostRecordingAnalysis(_sessionGeneration));
       }
     }
   }
 
-  void _startFogCueing() {
-    _rasCueBeatTimer?.cancel();
-    _rasBeatCounter = 0;
-    unawaited(voiceGuidePort.speak(ClinicalCopy.liveFogVoicePrompt));
-    _emitRasBeat();
-    // 80 BPM -> 750 ms beat interval
-    _rasCueBeatTimer = _periodicTimerFactory(
-      const Duration(milliseconds: 750),
-      (_) => _emitRasBeat(),
-    );
-  }
-
-  void _emitRasBeat() {
-    final isAccented = _rasBeatCounter % 4 == 0;
-    _rasBeatCounter++;
-    unawaited(
-      cueingPort.playMetronomeBeat(
-        accented: isAccented,
-        soundEnabled: true,
-        hapticEnabled: true,
-      ),
-    );
-  }
-
-  void _stopFogCueing() {
-    _rasCueBeatTimer?.cancel();
-    _rasCueBeatTimer = null;
-    unawaited(voiceGuidePort.stop());
-  }
-
-  Future<void> _finalizeSession(ClinicalSessionFsmState fsmState) async {
-    cancelTimersAndStreamsOnly();
+  Future<void> _startVideoCapture(int gen) async {
     try {
-      await edgeInferencePort.stopLiveStream();
-      final totalWins = fsmState.totalWindowCount;
-      final fogPct = totalWins == 0
-          ? 0.0
-          : ((fsmState.confirmedFogWindowCount / totalWins) * 100.0)
-              .clamp(0.0, 100.0);
-      final meanFi =
-          totalWins == 0 ? 0.0 : (fsmState.freezeIndexSum / totalWins);
-      final startedUtc = _sessionStartedUtc ?? _clock().toUtc();
+      await videoSessionPort.startRecording();
+    } catch (_) {
+      if (gen != _sessionGeneration) return;
+      _cancelTimersOnly();
+      writeState(
+        readState().copyWith(
+          fsm: readState().fsm.copyWith(stage: SessionStage.readyToRecord),
+          errorMessage: 'Gagal memulai perekaman video. Silakan coba lagi.',
+        ),
+      );
+    }
+  }
 
+  Future<void> _stopVideoCapture(int gen) async {
+    writeState(readState().copyWith(isFinalizingVideoFile: true));
+    try {
+      final path = await videoSessionPort.stopRecording();
+      await videoSessionPort.closeCameraPreview();
+      if (gen != _sessionGeneration) {
+        await videoSessionPort.secureDeleteVideo(path);
+        return;
+      }
+      final current = readState();
+      writeState(
+        current.copyWith(
+          fsm: _fsm.attachRecordedVideoPath(current.fsm, path),
+          isFinalizingVideoFile: false,
+        ),
+      );
+    } catch (_) {
+      await videoSessionPort.closeCameraPreview();
+      if (gen != _sessionGeneration) return;
+      writeState(
+        readState().copyWith(
+          isFinalizingVideoFile: false,
+          errorMessage: 'Gagal menyimpan video rekaman. Silakan ulangi.',
+        ),
+      );
+    } finally {
+      _pendingStopRecording = null;
+    }
+  }
+
+  Future<void> _runPostRecordingAnalysis(int gen) async {
+    final current = readState();
+    final videoPath = current.fsm.recordedVideoPath;
+    if (videoPath == null || videoPath.isEmpty) {
+      writeState(
+        current.copyWith(
+          fsm: current.fsm.copyWith(stage: SessionStage.readyToRecord),
+          errorMessage: 'Berkas video rekaman tidak ditemukan. Silakan ulangi.',
+        ),
+      );
+      unawaited(videoSessionPort.openCameraPreview());
+      return;
+    }
+
+    try {
+      final result = await videoSessionPort.analyzeRecordedVideo(
+        videoPath: videoPath,
+        protocol: current.fsm.protocol,
+        fallbackDurationSec: current.fsm.recordedDurationSec.toDouble(),
+        onProgress: (VideoAnalysisProgress progress) {
+          if (gen != _sessionGeneration) return;
+          final latest = readState();
+          writeState(
+            latest.copyWith(
+              fsm: latest.fsm.copyWith(
+                analysisProgress: progress.fraction,
+                clearAnalysisProgress: progress.fraction == null,
+                analysisProcessedFrames: progress.processedFrames,
+                analysisTotalFrames: progress.totalFrames,
+                analysisStageLabel: progress.stageLabelId,
+              ),
+            ),
+          );
+        },
+      );
+
+      if (gen != _sessionGeneration) return;
+
+      final startedUtc = _sessionStartedUtc ?? _clock().toUtc();
+      final latestFsm = readState().fsm;
       final summary = SessionSummaryItem(
         sessionId: 'sess_${startedUtc.microsecondsSinceEpoch}',
         startedAtUtc: startedUtc,
-        medState: fsmState.medState,
-        fogPercentage: double.parse(fogPct.toStringAsFixed(1)),
-        episodeCount: fsmState.episodeCount,
-        durationSec: fsmState.elapsedSec.toDouble(),
+        protocol: latestFsm.protocol,
+        medState: latestFsm.medState,
+        fogPercentage: result.fogPercentage,
+        episodeCount: result.episodeCount,
+        durationSec: result.durationSec,
       );
-
-      final episodes = ClinicalSessionFsm.extractConfirmedEpisodes(
-        fsmState.recordedWindows,
-      );
-      final medianEpisodeSec =
-          SessionClinicalReport.computeMedianEpisodeDuration(episodes);
-      final meanAsym = fsmState.recordedWindows.isEmpty
-          ? 0.0
-          : fsmState.recordedWindows
-                  .map((w) => w.bilateralAsymAnkle)
-                  .reduce((a, b) => a + b) /
-              fsmState.recordedWindows.length;
-      final locoEnergy = fsmState.episodeCount > 0 ? 2.4 : 4.6;
-      final freezeEnergy =
-          meanFi <= 0.01 ? 0.5 : (locoEnergy * meanFi).clamp(0.4, 25.0);
 
       final report = SessionClinicalReport(
         summary: summary,
         patientDisplayName: _patientNameReader(),
-        validLb6Ratio: fsmState.averageLb6Conf.clamp(0.0, 1.0),
-        totalFogDurationSec: fsmState.confirmedFogWindowCount.toDouble(),
-        medianEpisodeDurationSec: medianEpisodeSec,
-        locomotorBandEnergy: locoEnergy,
-        freezeBandEnergy: double.parse(freezeEnergy.toStringAsFixed(2)),
-        meanFreezeIndex: double.parse(meanFi.toStringAsFixed(2)),
-        meanBilateralAsymmetry: double.parse(meanAsym.toStringAsFixed(3)),
-        fallGuardFalseAlarms: fsmState.fallGuardFalseAlarms,
-        videoSecurelyDeleted: true,
+        classifierUsed: 'LIGHTGBM_FFT',
+        thresholdUsed: result.thresholdUsed,
+        validLb6Ratio: result.validLb6Ratio,
+        totalFogDurationSec: result.totalFogDurationSec,
+        medianEpisodeDurationSec: result.medianEpisodeDurationSec,
+        locomotorBandEnergy: result.locomotorBandEnergy,
+        freezeBandEnergy: result.freezeBandEnergy,
+        meanFreezeIndex: result.meanFreezeIndex,
+        meanBilateralAsymmetry: result.meanBilateralAsymmetry,
+        fallGuardFalseAlarms: 0,
+        videoSecurelyDeleted: result.videoSecurelyDeleted,
         isSimulatedPreview: readState().isPreviewSimulation,
-        episodes: episodes,
-        windows: fsmState.recordedWindows,
+        episodes: result.episodes,
+        windows: result.windows,
       );
 
       await dashboardRepository.saveSessionSummary(summary);
@@ -281,33 +399,47 @@ class ClinicalSessionCoordinator {
 
       final record = CompletedSessionRecord(
         summary: summary,
-        peakRiskScore: fsmState.peakRiskScore,
-        meanFreezeIndex: meanFi,
-        totalFogDurationSec: fsmState.confirmedFogWindowCount.toDouble(),
-        validLb6Ratio: fsmState.averageLb6Conf.clamp(0.0, 1.0),
-        fallGuardFalseAlarms: fsmState.fallGuardFalseAlarms,
-        videoSecurelyDeleted: true,
+        peakRiskScore: result.peakRiskScore,
+        meanFreezeIndex: result.meanFreezeIndex,
+        totalFogDurationSec: result.totalFogDurationSec,
+        validLb6Ratio: result.validLb6Ratio,
+        fallGuardFalseAlarms: 0,
+        videoSecurelyDeleted: result.videoSecurelyDeleted,
         isSimulatedPreview: readState().isPreviewSimulation,
         report: report,
       );
 
+      if (gen != _sessionGeneration) return;
+
       writeState(
         readState().copyWith(
-          fsm: fsmState.copyWith(
+          fsm: latestFsm.copyWith(
             stage: SessionStage.summaryReady,
+            clearVideoPath: true,
           ),
           completedRecord: record,
           clearError: true,
         ),
       );
     } catch (_) {
+      if (gen != _sessionGeneration) return;
+      final latest = readState();
       writeState(
-        readState().copyWith(
-          errorMessage: 'Gagal menyimpan ringkasan sesi ke memori perangkat.',
+        latest.copyWith(
+          fsm: latest.fsm.copyWith(
+            stage: SessionStage.readyToRecord,
+            countdownRemainingSec: ClinicalSessionFsm.countdownDurationSec,
+            elapsedSec: 0,
+            recordedDurationSec: 0,
+            clearVideoPath: true,
+          ),
+          errorMessage:
+              'Gagal mengekstrak pose dari video. Pastikan pencahayaan terang lalu rekam ulang.',
         ),
       );
+      unawaited(videoSessionPort.openCameraPreview());
     } finally {
-      await edgeInferencePort.secureDeleteTempVideo();
+      await videoSessionPort.secureDeleteVideo(videoPath);
     }
   }
 }

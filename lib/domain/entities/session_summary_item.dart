@@ -1,4 +1,5 @@
 import '../enums/medication_state.dart';
+import '../enums/session_protocol.dart';
 import '../enums/session_sync_status.dart';
 
 /// Summary of a completed gait screening session shown in S-03 metric pill & carousel.
@@ -6,6 +7,7 @@ class SessionSummaryItem {
   const SessionSummaryItem({
     required this.sessionId,
     required this.startedAtUtc,
+    this.protocol = SessionProtocol.turning360,
     required this.medState,
     required this.fogPercentage,
     required this.episodeCount,
@@ -15,6 +17,7 @@ class SessionSummaryItem {
 
   final String sessionId;
   final DateTime startedAtUtc;
+  final SessionProtocol protocol;
   final MedicationState medState;
   final double fogPercentage;
   final int episodeCount;
@@ -24,6 +27,7 @@ class SessionSummaryItem {
   SessionSummaryItem copyWith({
     String? sessionId,
     DateTime? startedAtUtc,
+    SessionProtocol? protocol,
     MedicationState? medState,
     double? fogPercentage,
     int? episodeCount,
@@ -33,6 +37,7 @@ class SessionSummaryItem {
     return SessionSummaryItem(
       sessionId: sessionId ?? this.sessionId,
       startedAtUtc: startedAtUtc ?? this.startedAtUtc,
+      protocol: protocol ?? this.protocol,
       medState: medState ?? this.medState,
       fogPercentage: fogPercentage ?? this.fogPercentage,
       episodeCount: episodeCount ?? this.episodeCount,
@@ -47,6 +52,7 @@ class SessionSummaryItem {
     return other is SessionSummaryItem &&
         other.sessionId == sessionId &&
         other.startedAtUtc == startedAtUtc &&
+        other.protocol == protocol &&
         other.medState == medState &&
         other.fogPercentage == fogPercentage &&
         other.episodeCount == episodeCount &&
@@ -58,6 +64,7 @@ class SessionSummaryItem {
   int get hashCode => Object.hash(
         sessionId,
         startedAtUtc,
+        protocol,
         medState,
         fogPercentage,
         episodeCount,

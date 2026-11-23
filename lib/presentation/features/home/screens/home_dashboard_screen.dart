@@ -184,11 +184,12 @@ class HomeDashboardScreen extends ConsumerWidget {
                       Expanded(
                         child: ParkinVerticalFeatureCard(
                           key: const Key('home_card_tes_360'),
-                          title: 'Tes 360°',
+                          title: 'Mulai Tes',
                           tiltRadians: -0.0873,
                           illustration: ParkinIcons.tes360Illustration(),
-                          semanticLabel: 'Mulai Tes putar 360 derajat',
-                          onPressed: () => context.push('/pre-flight'),
+                          semanticLabel:
+                              'Pilih dan mulai tes video berputar, berjalan bolak-balik, atau duduk berdiri',
+                          onPressed: () => context.push('/select-test'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -269,7 +270,7 @@ class HomeDashboardScreen extends ConsumerWidget {
                     onDismiss: () => ref
                         .read(homeDashboardControllerProvider.notifier)
                         .dismissDailyReminder(),
-                    onStart: () => context.push('/pre-flight'),
+                    onStart: () => context.push('/select-test'),
                   ),
                 ],
 
@@ -309,7 +310,7 @@ class HomeDashboardScreen extends ConsumerWidget {
                     description: ClinicalCopy.emptyHistoryBody,
                     ctaLabel: ClinicalCopy.emptyHistoryCta,
                     ctaKey: const Key('empty_start_first_test_button'),
-                    onCtaPressed: () => context.push('/pre-flight'),
+                    onCtaPressed: () => context.push('/select-test'),
                   )
                 else
                   SizedBox(
@@ -364,7 +365,7 @@ class HomeDashboardScreen extends ConsumerWidget {
           : '${latestSession.episodeCount} Episode';
       return (
         '$pct% FoG',
-        'Sesi terakhir · ${latestSession.medState.labelId} · $dateStr',
+        '${latestSession.protocol.shortLabelId} · ${latestSession.medState.labelId} · $dateStr',
         epLabel,
         () => context.go('/history'),
       );
@@ -374,7 +375,7 @@ class HomeDashboardScreen extends ConsumerWidget {
     if (latestMed != null) {
       return (
         latestMed.medState.labelId,
-        '${latestMed.drugName} ${latestMed.dosageMg.round()} mg · Belum ada Tes 360°',
+        '${latestMed.drugName} ${latestMed.dosageMg.round()} mg · Belum ada tes video',
         'Tercatat',
         () => showMedicationLogSheet(context),
       );
@@ -382,9 +383,9 @@ class HomeDashboardScreen extends ConsumerWidget {
 
     return (
       'Belum Ada Tes',
-      'Mulai Tes 360° 2 menit pertama Anda untuk melihat skor FoG',
+      'Pilih tes video 2 menit pertama Anda untuk memantau skor FoG',
       null,
-      () => context.push('/pre-flight'),
+      () => context.push('/select-test'),
     );
   }
 }

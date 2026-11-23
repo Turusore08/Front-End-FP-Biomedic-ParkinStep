@@ -7,6 +7,7 @@ import 'package:parkinstep/domain/entities/session_clinical_report.dart';
 import 'package:parkinstep/domain/entities/session_summary_item.dart';
 import 'package:parkinstep/domain/entities/window_prediction_item.dart';
 import 'package:parkinstep/domain/enums/medication_state.dart';
+import 'package:parkinstep/domain/enums/session_protocol.dart';
 import 'package:parkinstep/infrastructure/export/clinical_csv_exporter.dart';
 import 'package:parkinstep/infrastructure/export/clinical_pdf_exporter.dart';
 import 'package:parkinstep/infrastructure/export/local_report_export_adapter.dart';
@@ -160,6 +161,7 @@ void main() {
         summary: SessionSummaryItem(
           sessionId: 'sess-repo-1',
           startedAtUtc: DateTime.utc(2026, 11, 20, 7, 30),
+          protocol: SessionProtocol.walkBackAndForth,
           medState: MedicationState.on,
           fogPercentage: 15.0,
           episodeCount: 1,
@@ -196,6 +198,7 @@ void main() {
       final loaded = await repo.loadSessionReport('sess-repo-1');
       expect(loaded, isNotNull);
       expect(loaded!.patientDisplayName, 'Pak Budi');
+      expect(loaded.summary.protocol, SessionProtocol.walkBackAndForth);
       expect(loaded.episodes, hasLength(1));
       expect(loaded.episodes.first.durationSec, 3.0);
       expect(loaded.windows, hasLength(1));

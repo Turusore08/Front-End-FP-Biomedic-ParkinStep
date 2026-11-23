@@ -119,4 +119,31 @@ void main() {
       expect(out[1], closeTo(1.1, 1e-6));
     });
   });
+
+  group('Post-recording Batch Exact DSP', () {
+    test('computeAllWindowsBatch processes entire trial with validLb6Ratio & aligned window indices', () {
+      final flat = Float32List(lb6.length * 18);
+      for (var t = 0; t < lb6.length; t++) {
+        flat.setRange(t * 18, (t + 1) * 18, frameAt(t));
+      }
+      final batch = FogFeatureExtractor.computeAllWindowsBatch(flat, lb6.length);
+      expect(batch.validLb6Ratio, greaterThan(0.5));
+      expect(batch.validLb6Ratio, lessThanOrEqualTo(1.0));
+      expect(batch.windows, isNotEmpty);
+      expect(batch.windows.first.windowIdx, 0);
+      expect(batch.windows.first.startSec, 0.0);
+      expect(batch.windows.first.endSec, closeTo(2.0, 1e-6));
+      expect(batch.windows.first.features, hasLength(126));
+      expect(batch.windows.first.freezeIndexAnkle.isFinite, isTrue);
+      expect(batch.windows.first.locomotorEnergyAnkle.isFinite, isTrue);
+      expect(batch.windows.first.freezeEnergyAnkle.isFinite, isTrue);
+      expect(batch.windows.first.bilateralAsymAnkle.isFinite, isTrue);
+
+      final tooShort = FogFeatureExtractor.computeAllWindowsBatch(
+        Float32List(10 * 18),
+        10,
+      );
+      expect(tooShort.windows, isEmpty);
+    });
+  });
 }

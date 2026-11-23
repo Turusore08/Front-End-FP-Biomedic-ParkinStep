@@ -1,8 +1,10 @@
 import '../enums/medication_state.dart';
+import '../enums/session_protocol.dart';
 
-/// Immutable pre-flight physical safety & Levodopa state required before S-05 camera launch.
+/// Immutable pre-flight safety, protocol selection & Levodopa state required before camera launch.
 class PreFlightChecklist {
   const PreFlightChecklist({
+    this.protocol = SessionProtocol.turning360,
     this.floorSafe = false,
     this.spaceClear = false,
     this.supportReady = false,
@@ -10,6 +12,7 @@ class PreFlightChecklist {
     this.medState = MedicationState.unknown,
   });
 
+  final SessionProtocol protocol;
   final bool floorSafe;
   final bool spaceClear;
   final bool supportReady;
@@ -25,6 +28,7 @@ class PreFlightChecklist {
   bool get isAllChecked => completedCount == 4;
 
   PreFlightChecklist copyWith({
+    SessionProtocol? protocol,
     bool? floorSafe,
     bool? spaceClear,
     bool? supportReady,
@@ -32,6 +36,7 @@ class PreFlightChecklist {
     MedicationState? medState,
   }) {
     return PreFlightChecklist(
+      protocol: protocol ?? this.protocol,
       floorSafe: floorSafe ?? this.floorSafe,
       spaceClear: spaceClear ?? this.spaceClear,
       supportReady: supportReady ?? this.supportReady,
@@ -44,6 +49,7 @@ class PreFlightChecklist {
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
     return other is PreFlightChecklist &&
+        other.protocol == protocol &&
         other.floorSafe == floorSafe &&
         other.spaceClear == spaceClear &&
         other.supportReady == supportReady &&
@@ -53,6 +59,7 @@ class PreFlightChecklist {
 
   @override
   int get hashCode => Object.hash(
+        protocol,
         floorSafe,
         spaceClear,
         supportReady,

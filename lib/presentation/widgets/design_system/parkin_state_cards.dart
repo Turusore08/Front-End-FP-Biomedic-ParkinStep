@@ -12,13 +12,19 @@ class ParkinLoadingDspCard extends StatelessWidget {
     super.key,
     required this.title,
     required this.description,
+    this.progress,
+    this.progressLabel,
   });
 
   final String title;
   final String description;
+  final double? progress;
+  final String? progressLabel;
 
   @override
   Widget build(BuildContext context) {
+    final pct = progress != null ? (progress!.clamp(0.0, 1.0) * 100).round() : null;
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -28,13 +34,18 @@ class ParkinLoadingDspCard extends StatelessWidget {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(
-            width: 52,
-            height: 52,
-            child: CircularProgressIndicator(
-              strokeWidth: 4.5,
-              color: AppColors.clinicalAzure,
+          Center(
+            child: SizedBox(
+              width: 52,
+              height: 52,
+              child: CircularProgressIndicator(
+                value: progress,
+                strokeWidth: 4.5,
+                color: AppColors.clinicalAzure,
+                backgroundColor: AppColors.iceSurface,
+              ),
             ),
           ),
           const SizedBox(height: 18),
@@ -49,6 +60,32 @@ class ParkinLoadingDspCard extends StatelessWidget {
             textAlign: TextAlign.center,
             style: AppTypography.bodyLarge(size: 14.5),
           ),
+          if (progress != null || progressLabel != null) ...[
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 8,
+                color: AppColors.clinicalAzure,
+                backgroundColor: AppColors.iceSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              [
+                if (pct != null) '$pct%',
+                if (progressLabel != null && progressLabel!.isNotEmpty)
+                  progressLabel!,
+              ].join(' · '),
+              textAlign: TextAlign.center,
+              style: AppTypography.captionBadge(
+                color: AppColors.onIceAzure,
+                weight: FontWeight.w700,
+                tabular: true,
+              ),
+            ),
+          ],
         ],
       ),
     );

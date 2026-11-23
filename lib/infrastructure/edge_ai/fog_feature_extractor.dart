@@ -39,6 +39,42 @@ class FogWindowSnapshot {
   final double fs;
 }
 
+/// One window output from full-session batch exact DSP ([FogFeatureExtractor.computeAllWindowsBatch]).
+class BatchWindowFeatureEntry {
+  const BatchWindowFeatureEntry({
+    required this.windowIdx,
+    required this.startSec,
+    required this.endSec,
+    required this.features,
+    required this.freezeIndexAnkle,
+    required this.locomotorEnergyAnkle,
+    required this.freezeEnergyAnkle,
+    required this.bilateralAsymAnkle,
+    required this.isLowQuality,
+  });
+
+  final int windowIdx;
+  final double startSec;
+  final double endSec;
+  final Float32List features;
+  final double freezeIndexAnkle;
+  final double locomotorEnergyAnkle;
+  final double freezeEnergyAnkle;
+  final double bilateralAsymAnkle;
+  final bool isLowQuality;
+}
+
+/// Result of full-trial exact DSP over an entire recorded video sequence (`POST_SESSION_EXACT`).
+class BatchFogExtractionResult {
+  const BatchFogExtractionResult({
+    required this.windows,
+    required this.validLb6Ratio,
+  });
+
+  final List<BatchWindowFeatureEntry> windows;
+  final double validLb6Ratio;
+}
+
 /// Streaming Scenario B (`B_15hz`) DSP + `extract_fft_kinematic_features`,
 /// ported from `parkinsonfp-biomed.ipynb` and
 /// `MobileFOG_Rhama_Training_4Models_Kaggle.ipynb`.
@@ -169,6 +205,98 @@ class FogFeatureExtractor {
       dx: [for (final s in dx) slice(s)],
       dy: [for (final s in dy) slice(s)],
       fs: snap.fs,
+    );
+  }
+
+  /// Exact post-session batch DSP (`POST_SESSION_EXACT`): computes whole-trial
+  /// interpolation, Hampel(7, 3.0), whole-trial median normalization, and
+  /// gradients once, then extracts sliding 2 s (30 frame) windows every 1 s (15 frames).
+  static BatchFogExtractionResult computeAllWindowsBatch(
+    Float32List lb6Flat,
+    int frameCount, {
+    int window = 30,
+    int stride = 15,
+    double fs = 15.0,
+  }) {
+    if (frameCount <= 0 || lb6Flat.length < frameCount * joints * 3) {
+      return const BatchFogExtractionResult(
+        windows: <BatchWindowFeatureEntry>[],
+        validLb6Ratio: 0.0,
+      );
+    }
+
+    final x = List<Float32List>.generate(joints, (_) => Float32List(frameCount));
+    final y = List<Float32List>.generate(joints, (_) => Float32List(frameCount));
+    final c = List<Float32List>.generate(joints, (_) => Float32List(frameCount));
+    var validPoints = 0;
+    final totalPoints = frameCount * joints;
+
+    for (var t = 0; t < frameCount; t++) {
+      final base = t * joints * 3;
+      for (var v = 0; v < joints; v++) {
+        x[v][t] = lb6Flat[base + v * 3];
+        y[v][t] = lb6Flat[base + v * 3 + 1];
+        final confVal = lb6Flat[base + v * 3 + 2];
+        c[v][t] = confVal;
+        if (confVal >= confValid) {
+          validPoints++;
+        }
+      }
+    }
+
+    final validRatio =
+        totalPoints == 0 ? 0.0 : (validPoints / totalPoints).clamp(0.0, 1.0);
+    if (frameCount < window) {
+      return BatchFogExtractionResult(
+        windows: const <BatchWindowFeatureEntry>[],
+        validLb6Ratio: validRatio,
+      );
+    }
+
+    for (var v = 0; v < joints; v++) {
+      _interpolateLowConf(x[v], y[v], c[v]);
+      x[v] = hampel(x[v]);
+      y[v] = hampel(y[v]);
+    }
+    final (xn, yn) = _normalize(x, y);
+    final dx = List<Float32List>.generate(joints, (v) => gradient(xn[v]));
+    final dy = List<Float32List>.generate(joints, (v) => gradient(yn[v]));
+
+    final entries = <BatchWindowFeatureEntry>[];
+    var windowIdx = 0;
+    for (var start = 0; start + window <= frameCount; start += stride) {
+      final end = start + window;
+      Float32List slice(Float32List s) => Float32List.sublistView(s, start, end);
+      final feat = extractFeatures(
+        x: [for (final s in xn) slice(s)],
+        y: [for (final s in yn) slice(s)],
+        conf: [for (final s in c) slice(s)],
+        dx: [for (final s in dx) slice(s)],
+        dy: [for (final s in dy) slice(s)],
+        fs: fs,
+      );
+      final locoAnkle = 0.5 * (feat.features[94] + feat.features[95]);
+      final freezeAnkle = 0.5 * (feat.features[100] + feat.features[101]);
+      final rawAsymV = feat.features[118].clamp(0.0, 1.0);
+      entries.add(
+        BatchWindowFeatureEntry(
+          windowIdx: windowIdx,
+          startSec: start / fs,
+          endSec: end / fs,
+          features: feat.features,
+          freezeIndexAnkle: feat.freezeIndexAnkle,
+          locomotorEnergyAnkle: locoAnkle,
+          freezeEnergyAnkle: freezeAnkle,
+          bilateralAsymAnkle: rawAsymV,
+          isLowQuality: feat.isLowQuality,
+        ),
+      );
+      windowIdx++;
+    }
+
+    return BatchFogExtractionResult(
+      windows: List<BatchWindowFeatureEntry>.unmodifiable(entries),
+      validLb6Ratio: validRatio,
     );
   }
 

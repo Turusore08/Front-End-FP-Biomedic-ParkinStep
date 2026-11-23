@@ -207,6 +207,24 @@ class _SessionReportScreenState extends ConsumerState<SessionReportScreen> {
                   border: Border.all(color: AppColors.skyCard),
                 ),
                 child: Text(
+                  s.protocol.titleId,
+                  style: AppTypography.captionBadge(
+                    color: AppColors.onIceAzure,
+                    weight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.iceSurface,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.skyCard),
+                ),
+                child: Text(
                   report.isSimulatedPreview
                       ? 'Data Simulasi · ${s.medState.labelId}'
                       : 'Sesi Tersimpan · ${s.medState.labelId}',
