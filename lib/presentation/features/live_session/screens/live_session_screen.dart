@@ -21,6 +21,7 @@ import '../../../widgets/design_system/parkin_progress_pill.dart';
 import '../../../widgets/design_system/parkin_secondary_ice_button.dart';
 import '../../../widgets/design_system/parkin_state_cards.dart';
 import '../../analytics/widgets/video_skeleton_player_card.dart';
+import '../widgets/camera_standing_guide_overlay.dart';
 import '../widgets/live_camera_backdrop.dart';
 
 /// Unified video-based screening flow hosting:
@@ -197,23 +198,16 @@ class _ReadyToRecordView extends StatelessWidget {
           child: Stack(
             children: [
               const Positioned.fill(child: LiveCameraBackdrop()),
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Center(
-                    child: Container(
-                      width: 200,
-                      height: 290,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: AppColors.skyCard.withValues(alpha: 0.7),
-                          width: 2.0,
-                        ),
-                      ),
-                    ),
+              if (!hasError)
+                Positioned.fill(
+                  child: CameraStandingGuideOverlay(
+                    key: const Key('camera_standing_guide_overlay'),
+                    protocol: fsm.protocol,
+                    isRecording: false,
+                    topInsetFactor: uiState.isPreviewSimulation ? 0.20 : 0.13,
+                    bottomInsetFactor: 0.39,
                   ),
                 ),
-              ),
               LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
@@ -453,6 +447,15 @@ class _VideoRecordingView extends StatelessWidget {
         body: Stack(
           children: [
             const Positioned.fill(child: LiveCameraBackdrop()),
+            Positioned.fill(
+              child: CameraStandingGuideOverlay(
+                key: const Key('camera_standing_guide_overlay'),
+                protocol: fsm.protocol,
+                isRecording: true,
+                topInsetFactor: uiState.isPreviewSimulation ? 0.26 : 0.20,
+                bottomInsetFactor: 0.30,
+              ),
+            ),
             SafeArea(
               child: LayoutBuilder(
                 builder: (context, constraints) {

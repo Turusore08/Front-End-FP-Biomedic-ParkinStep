@@ -15,9 +15,11 @@ import 'package:parkinstep/domain/entities/fog_episode_item.dart';
 import 'package:parkinstep/domain/entities/onboarding_status.dart';
 import 'package:parkinstep/domain/entities/recorded_pose_track.dart';
 import 'package:parkinstep/domain/enums/onboarding_auth_mode.dart';
+import 'package:parkinstep/domain/enums/session_protocol.dart';
 import 'package:parkinstep/infrastructure/persistence/local_onboarding_repository.dart';
 import 'package:parkinstep/presentation/features/analytics/painters/recorded_skeleton_overlay_painter.dart';
 import 'package:parkinstep/presentation/features/live_session/screens/live_session_screen.dart';
+import 'package:parkinstep/presentation/features/live_session/widgets/camera_standing_guide_overlay.dart';
 import 'package:parkinstep/presentation/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -184,8 +186,25 @@ void main() {
       await tester.tap(find.byKey(const Key('preflight_continue_button')));
       await tester.pumpAndSettle();
 
-      // 2. Now in ReadyToRecord: clean camera view, NO skeleton or live FoG gauge
+      // 2. Now in ReadyToRecord: clean camera view + standing guide box, NO skeleton or live FoG gauge
       expect(find.byKey(const Key('record_ready_card')), findsOneWidget);
+      expect(
+        find.byKey(const Key('camera_standing_guide_overlay')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('camera_standing_guide_paint')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('standing_guide_distance_badge')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('standing_guide_feet_badge')),
+        findsOneWidget,
+      );
+      expect(find.text('Kursi & tubuh di kotak (2-3 m)'), findsOneWidget);
       expect(find.byKey(const Key('record_start_button')), findsOneWidget);
       expect(find.textContaining('Sendi LB6'), findsNothing);
       expect(find.text('Risiko FoG'), findsNothing);
@@ -206,8 +225,21 @@ void main() {
       expect(find.text('1'), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
 
-      // 4. Now actively recording video with 0s instruction & voice cue
+      // 4. Now actively recording video with 0s instruction & voice cue + unobtrusive guide frame
       expect(find.byKey(const Key('recording_rec_badge')), findsOneWidget);
+      expect(
+        find.byKey(const Key('camera_standing_guide_overlay')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('camera_standing_guide_paint')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('standing_guide_distance_badge')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('standing_guide_feet_badge')), findsNothing);
       expect(find.byKey(const Key('live_progress_pill')), findsOneWidget);
       expect(find.byKey(const Key('live_highlight_prompt')), findsOneWidget);
       expect(find.text('DUDUK LALU BERDIRI'), findsOneWidget);
@@ -373,6 +405,10 @@ void main() {
 
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('camera_standing_guide_overlay')),
+        findsOneWidget,
+      );
 
       expect(
         tester.getSize(find.byKey(const Key('live_cancel_button'))).height,
@@ -402,6 +438,10 @@ void main() {
         await tester.pump(const Duration(seconds: 1));
       }
       expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('camera_standing_guide_overlay')),
+        findsOneWidget,
+      );
       expect(
         tester.getSize(find.byKey(const Key('record_stop_button'))).height,
         greaterThanOrEqualTo(64.0),
@@ -467,6 +507,44 @@ void main() {
         expect(tester.getSize(finder).height, greaterThanOrEqualTo(56.0));
       }
       expect(tester.takeException(), isNull);
+    });
+
+    test(
+        'CameraStandingGuideOverlay.computeGuideRect centers & fits safely across phone viewports for all 3 protocols',
+        () {
+      for (final viewport in const <Size>[Size(360, 640), Size(412, 915)]) {
+        for (final protocol in SessionProtocol.values) {
+          final rect = CameraStandingGuideOverlay.computeGuideRect(
+            viewport,
+            protocol: protocol,
+            topInsetFactor: 0.13,
+            bottomInsetFactor: 0.39,
+          );
+          expect(rect.isEmpty, isFalse);
+          expect(rect.left, greaterThan(0.0));
+          expect(rect.right, lessThan(viewport.width));
+          expect(rect.top, greaterThanOrEqualTo(0.0));
+          expect(rect.bottom, lessThanOrEqualTo(viewport.height));
+          expect(
+            ((viewport.width - rect.width) / 2.0 - rect.left).abs(),
+            lessThan(0.01),
+          );
+        }
+
+        final walkingRect = CameraStandingGuideOverlay.computeGuideRect(
+          viewport,
+          protocol: SessionProtocol.walkBackAndForth,
+          topInsetFactor: 0.13,
+          bottomInsetFactor: 0.39,
+        );
+        final turningRect = CameraStandingGuideOverlay.computeGuideRect(
+          viewport,
+          protocol: SessionProtocol.turning360,
+          topInsetFactor: 0.13,
+          bottomInsetFactor: 0.39,
+        );
+        expect(walkingRect.width, greaterThan(turningRect.width));
+      }
     });
   });
 }
